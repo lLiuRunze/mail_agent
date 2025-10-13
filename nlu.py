@@ -1,7 +1,7 @@
 """
 自然语言理解模块
 解析用户输入的自然语言句子，识别任务意图并提取相关参数
-调用 DeepSeek 或其他大模型 API 进行意图识别
+混合使用正则表达式和 DeepSeek API 进行参数提取
 """
 
 import json
@@ -50,6 +50,11 @@ class NLUEngine:
             'list_emails': ['列出', '显示', '查看邮件', 'list', 'show'],
             'search_email': ['搜索', '查找', 'search', 'find']
         }
+
+        self.email_pattern = re.compile(
+            r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\.[A-Za-z]{2,})?'
+            )
+
     
     def parse_task(self, user_input: str) -> Dict[str, Any]:
         """
@@ -61,12 +66,14 @@ class NLUEngine:
         Returns:
             Dict[str, Any]: 包含任务类型和参数的字典
         """
-        # 先尝试快速匹配
+        # 先尝试快速匹配意图
         quick_result = self._quick_match(user_input)
         if quick_result and quick_result['intent'] != 'unknown':
+            print(f"✓ 快速匹配成功: {quick_result['intent']}")
             return quick_result
         
         # 使用大模型进行深度分析
+        print("→ 使用大模型进行意图分析...")
         result = self.analyze_intent(user_input)
         
         return result
@@ -87,8 +94,8 @@ class NLUEngine:
         for intent, keywords in self.intent_keywords.items():
             for keyword in keywords:
                 if keyword in user_input_lower:
-                    # 提取参数
-                    parameters = self._extract_parameters(user_input, intent)
+                    # 混合提取参数（正则 + DeepSeek）
+                    parameters = self._extract_parameters_hybrid(user_input, intent)
                     return {
                         'intent': intent,
                         'parameters': parameters,
@@ -103,9 +110,29 @@ class NLUEngine:
             'original_input': user_input
         }
     
-    def _extract_parameters(self, user_input: str, intent: str) -> Dict[str, Any]:
+    def _extract_email_addresses(self, text: str) -> List[str]:
         """
-        从用户输入中提取参数（使用DeepSeek深度分析）
+        使用正则表达式提取所有邮箱地址
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            List[str]: 邮箱地址列表
+        """
+        emails = self.email_pattern.findall(text)
+        # 去重并保持顺序
+        seen = set()
+        unique_emails = []
+        for email in emails:
+            if email.lower() not in seen:
+                seen.add(email.lower())
+                unique_emails.append(email)
+        return unique_emails
+    
+    def _extract_parameters_hybrid(self, user_input: str, intent: str) -> Dict[str, Any]:
+        """
+        混合提取参数：正则表达式提取邮箱，DeepSeek提取其他参数
         
         Args:
             user_input: 用户输入
@@ -114,9 +141,167 @@ class NLUEngine:
         Returns:
             Dict[str, Any]: 提取的参数
         """
-        # 直接使用DeepSeek深度分析
-        return self._extract_parameters_deepseek(user_input, intent)
+        parameters = {}
+        
+        # 1. 使用正则表达式提取邮箱地址
+        email_addresses = self._extract_email_addresses(user_input)
+        
+        if email_addresses:
+            if len(email_addresses) == 1:
+                # 单个邮箱
+                parameters['email_address'] = email_addresses[0]
+                if intent == 'forward_email':
+                    parameters['forward_to'] = email_addresses[0]
+            else:
+                # 多个邮箱
+                parameters['recipients'] = email_addresses
+                if intent == 'forward_email':
+                    # 转发意图：第一个可能是发件人，其余是收件人
+                    parameters['email_address'] = email_addresses[0]
+                    parameters['forward_to'] = email_addresses[0]
+                    if len(email_addresses) > 1:
+                        parameters['recipients'] = email_addresses
+        
+        # 2. 使用 DeepSeek 提取其他参数（邮件ID、数量、文件夹等）
+        deepseek_params = self._extract_parameters_deepseek(user_input, intent)
+        
+        # 3. 合并参数（DeepSeek的参数优先级更高，但不覆盖已提取的邮箱）
+        for key, value in deepseek_params.items():
+            if key not in ['email_address', 'forward_to', 'recipients']:
+                # 非邮箱参数直接使用DeepSeek的结果
+                parameters[key] = value
+            elif key in ['email_address', 'forward_to', 'recipients'] and not parameters.get(key):
+                # 如果正则没提取到邮箱，使用DeepSeek的结果
+                parameters[key] = value
+        
+        # 4. 后处理：确保参数格式正确
+        parameters = self._post_process_parameters(parameters, intent)
+        
+        return parameters
     
+    def _extract_parameters_deepseek(self, user_input: str, intent: str) -> Dict[str, Any]:
+        """
+        使用DeepSeek深度分析提取参数（不包括邮箱地址）
+        
+        Args:
+            user_input: 用户输入
+            intent: 识别出的意图
+            
+        Returns:
+            Dict[str, Any]: 提取的参数
+        """
+        # 构建提示词
+        prompt = f"""请从以下用户输入中提取与"{intent}"意图相关的参数：
+
+用户输入："{user_input}"
+意图：{intent}
+
+请以JSON格式返回提取到的参数：
+{{
+    "email_id": "邮件ID或邮件ID列表",
+    "folder_name": "文件夹名称（如果有）",
+    "count": "数量（如果有）",
+    "content": "内容（如果有）",
+    "batch_operation": "是否为批量操作（true/false）"
+}}
+
+重要规则：
+1. 只返回JSON格式，不要添加其他说明
+2. 只包含实际提取到的参数，没有的参数不要包含
+3. email_id提取规则：
+   - "第一封"、"第1封" → "1"
+   - "第二封"、"第2封" → "2"
+   - "最新的"、"最后一封" → "latest"
+   - "邮件123" → "123"
+   - "邮件1,2,3" → ["1", "2", "3"]（列表形式）
+   - "前三封" → batch_operation=true, count=3, email_id="1"
+4. count提取规则：
+   - "最近10封" → 10
+   - "前5封" → 5
+   - "三封邮件" → 3
+5. batch_operation判断：
+   - "前N封"、"最近N封"、"批量" → true
+   - 单个邮件操作 → false
+6. 不要提取邮箱地址（email_address、forward_to、recipients），这些由正则表达式处理
+
+示例：
+- "转发第一封邮件" → {{"email_id": "1", "batch_operation": false}}
+- "转发邮件1,2,3" → {{"email_id": ["1", "2", "3"], "batch_operation": false}}
+- "转发前三封邮件" → {{"email_id": "1", "batch_operation": true, "count": 3}}
+- "删除最近5封邮件" → {{"email_id": "1", "batch_operation": true, "count": 5}}
+- "归档邮件到工作文件夹" → {{"email_id": "latest", "folder_name": "工作文件夹", "batch_operation": false}}
+- "总结最近10封邮件" → {{"batch_operation": true, "count": 10}}"""
+        
+        messages = [
+            {"role": "system", "content": "你是一个专业的参数提取助手，擅长从自然语言中提取结构化参数。"},
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = self.deepseek_api._make_request(
+            messages,
+            temperature=0.2,  # 降低温度以获得更稳定的结果
+            max_tokens=Config.INTENT_MAX_TOKENS
+        )
+        
+        if response:
+            try:
+                # 提取JSON内容
+                start_idx = response.find('{')
+                end_idx = response.rfind('}') + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = response[start_idx:end_idx]
+                    result = json.loads(json_str)
+                    return result
+            except json.JSONDecodeError as e:
+                print(f"✗ 解析DeepSeek响应失败: {str(e)}")
+                return {}
+        
+        return {}
+    
+    def _post_process_parameters(self, parameters: Dict[str, Any], intent: str) -> Dict[str, Any]:
+        """
+        后处理参数，确保格式正确
+        
+        Args:
+            parameters: 原始参数
+            intent: 意图类型
+            
+        Returns:
+            Dict[str, Any]: 处理后的参数
+        """
+        # 处理 email_id 列表
+        if 'email_id' in parameters and isinstance(parameters['email_id'], list):
+            # 如果是列表且只有一个元素，转为单个值
+            if len(parameters['email_id']) == 1:
+                parameters['email_id'] = parameters['email_id'][0]
+            # 如果是多个邮件ID，标记为批量操作
+            elif len(parameters['email_id']) > 1:
+                parameters['email_ids'] = parameters['email_id']
+                parameters['email_id'] = parameters['email_id'][0]  # 保留第一个作为主ID
+                parameters['batch_operation'] = True
+        
+        # 处理 count 参数
+        if 'count' in parameters:
+            try:
+                parameters['count'] = int(parameters['count'])
+            except (ValueError, TypeError):
+                pass
+        
+        # 处理 batch_operation
+        if 'batch_operation' in parameters:
+            if isinstance(parameters['batch_operation'], str):
+                parameters['batch_operation'] = parameters['batch_operation'].lower() == 'true'
+        
+        # 特殊处理：list_emails 默认数量
+        if intent == 'list_emails' and 'count' not in parameters:
+            parameters['count'] = 10
+        
+        # 特殊处理：forward_email 确保有 forward_to
+        if intent == 'forward_email':
+            if 'email_address' in parameters and 'forward_to' not in parameters:
+                parameters['forward_to'] = parameters['email_address']
+        
+        return parameters
     
     def analyze_intent(self, user_input: str) -> Dict[str, Any]:
         """
@@ -143,10 +328,10 @@ class NLUEngine:
     "intent": "意图类型（从上述列表中选择）",
     "parameters": {{
         "email_id": "邮件ID（如果有）",
-        "email_address": "邮箱地址（如果有）",
         "folder_name": "文件夹名称（如果有）",
         "count": "数量（如果有）",
-        "content": "内容（如果有）"
+        "content": "内容（如果有）",
+        "batch_operation": "是否为批量操作（true/false）"
     }},
     "confidence": 0.95,
     "explanation": "简短解释为什么识别为这个意图"
@@ -155,7 +340,8 @@ class NLUEngine:
 注意：
 1. 只返回JSON格式，不要添加其他说明
 2. parameters中只包含实际提取到的参数
-3. confidence是0-1之间的浮点数"""
+3. 不要提取邮箱地址，这些由正则表达式处理
+4. confidence是0-1之间的浮点数"""
         
         messages = [
             {"role": "system", "content": "你是一个专业的自然语言理解助手，擅长识别用户意图并提取参数。"},
@@ -180,6 +366,22 @@ class NLUEngine:
                     # 验证意图是否有效
                     if result.get('intent') not in self.supported_intents:
                         result['intent'] = 'unknown'
+                    
+                    # 混合提取邮箱地址
+                    email_addresses = self._extract_email_addresses(user_input)
+                    if email_addresses:
+                        if len(email_addresses) == 1:
+                            result['parameters']['email_address'] = email_addresses[0]
+                            if result['intent'] == 'forward_email':
+                                result['parameters']['forward_to'] = email_addresses[0]
+                        else:
+                            result['parameters']['recipients'] = email_addresses
+                    
+                    # 后处理参数
+                    result['parameters'] = self._post_process_parameters(
+                        result['parameters'],
+                        result['intent']
+                    )
                     
                     # 添加原始输入
                     result['original_input'] = user_input
@@ -228,12 +430,12 @@ class NLUEngine:
         # 定义每个意图所需的参数
         required_params = {
             'reply_email': ['email_id'],
-            'archive_email': ['email_id'],
-            'delete_email': ['email_id'],
-            'forward_email': ['email_id', 'email_address'],
+            'archive_email': [],  # 批量操作时不需要email_id
+            'delete_email': [],   # 批量操作时不需要email_id
+            'forward_email': [],  # 需要email_id或batch_operation，以及email_address或recipients
             'mark_read': ['email_id'],
             'mark_unread': ['email_id'],
-            'summarize_email': ['email_id'],  # 可以是单个邮件ID或批量操作
+            'summarize_email': [],  # 可以是单个邮件ID或批量操作
             'analyze_priority': ['email_id'],
             'move_email': ['email_id', 'folder_name'],
             'generate_reply': ['email_id'],
@@ -244,130 +446,37 @@ class NLUEngine:
         if intent not in required_params:
             return True, ""  # 未知意图不验证
         
+        # 特殊处理：批量操作
+        if parameters.get('batch_operation') == True:
+            # 批量操作需要count参数
+            if 'count' not in parameters:
+                return False, "批量操作需要指定数量"
+            
+            # 批量转发需要目标邮箱
+            if intent == 'forward_email':
+                if 'email_address' not in parameters and 'recipients' not in parameters:
+                    return False, "批量转发需要指定目标邮箱"
+            
+            # 批量归档需要文件夹（可选，有默认值）
+            # 批量删除不需要额外参数
+            
+            return True, ""
+        
+        # 单个操作验证
         missing_params = []
         for param in required_params[intent]:
             if param not in parameters or not parameters[param]:
                 missing_params.append(param)
         
-        # 特殊处理：批量操作
-        if parameters.get('batch_operation') == True:
-            # 批量操作，email_id和email_address不是必需的
-            if intent == 'forward_email':
-                # 批量转发需要email_address
-                if 'email_address' not in parameters:
-                    return False, "批量转发需要指定邮箱地址"
-            return True, ""
-        
-        # 特殊处理：如果是批量总结操作，允许没有email_id
-        if intent == 'summarize_email' and 'count' in parameters and not parameters.get('email_id'):
-            # 批量总结操作，不需要email_id
-            return True, ""
+        # 特殊处理：转发邮件需要目标邮箱
+        if intent == 'forward_email':
+            if 'email_address' not in parameters and 'recipients' not in parameters:
+                missing_params.append('email_address 或 recipients')
         
         if missing_params:
             return False, f"缺少必需参数: {', '.join(missing_params)}"
         
         return True, ""
-    
-    
-    def _extract_parameters_deepseek(self, user_input: str, intent: str) -> Dict[str, Any]:
-        """
-        使用DeepSeek深度分析提取参数
-        
-        Args:
-            user_input: 用户输入
-            intent: 识别出的意图
-            
-        Returns:
-            Dict[str, Any]: 提取的参数
-        """
-        # 构建提示词
-        prompt = f"""请从以下用户输入中提取与"{intent}"意图相关的参数：
-
-用户输入："{user_input}"
-意图：{intent}
-
-请以JSON格式返回提取到的参数：
-{{
-    "email_id": "邮件ID（如果有）",
-    "email_address": "邮箱地址（如果有）",
-    "forward_to": "转发目标邮箱地址（如果有）",
-    "recipients": "收件人列表（如果有多个收件人）",
-    "folder_name": "文件夹名称（如果有）",
-    "count": "数量（如果有）",
-    "content": "内容（如果有）",
-    "batch_operation": "是否为批量操作（true/false）"
-}}
-
-重要规则：
-1. 只返回JSON格式，不要添加其他说明
-2. 只包含实际提取到的参数，没有的参数不要包含
-3. email_id必须是数字字符串或"latest"，不能是中文
-4. 如果用户说"第一封邮件"、"第一封"、"第1封"，email_id必须是"1"
-5. 如果用户说"最新的邮件"、"最新邮件"、"最后一封"，email_id必须是"latest"
-6. 如果用户说"第二封邮件"、"第二封"、"第2封"，email_id必须是"2"
-7. 如果用户说"第三封邮件"、"第三封"、"第3封"，email_id必须是"3"
-8. 如果用户说"第四封邮件"、"第四封"、"第4封"，email_id必须是"4"
-9. 如果用户说"第五封邮件"、"第五封"、"第5封"，email_id必须是"5"
-10. 邮箱地址要完整且正确，格式为xxx@domain.com
-11. 如果意图是forward_email，需要同时设置email_address和forward_to
-12. 如果用户提供多个收件人（用"和"、"、"、"、"等连接），设置recipients为数组，如["email1@domain.com", "email2@domain.com"]
-13. 邮箱地址识别要准确，注意域名顺序（如stu.sufe.edu.cn，不是stu.edu.sufe.cn）
-14. 如果用户说"那个重要的邮件"、"那封邮件"等模糊表达，email_id必须是"latest"
-15. 如果用户说"昨天收到的邮件"、"关于xxx的邮件"等，email_id必须是"latest"
-16. 如果用户说"张三发来的邮件"，email_id必须是"latest"（因为无法确定具体ID）
-17. 如果用户说"给项目经理"、"发给经理"等，但项目经理不是邮箱地址，则email_address应该是"latest"或空
-18. 如果用户说"回复xxx的邮件"，email_id必须是"latest"
-19. 如果无法确定具体的邮箱地址，不要设置email_address参数
-20. 批量操作规则：
-    - 如果用户说"前三封邮件"、"前5封邮件"、"最近3封邮件"等，设置batch_operation为true，count为对应数量
-    - 如果用户说"转发前三封邮件"，email_id设为"1"，batch_operation设为true，count设为"3"
-    - 如果用户说"删除前5封邮件"，email_id设为"1"，batch_operation设为true，count设为"5"
-    - 如果用户说"归档最近3封邮件"，email_id设为"1"，batch_operation设为true，count设为"3"
-
-示例：
-- "转发第一封邮件到test@example.com" → {{"email_id": "1", "email_address": "test@example.com", "forward_to": "test@example.com", "batch_operation": false}}
-- "转发第一封邮件到test@example.com和user@domain.com" → {{"email_id": "1", "recipients": ["test@example.com", "user@domain.com"], "batch_operation": false}}
-- "转发前三封邮件到test@example.com" → {{"email_id": "1", "email_address": "test@example.com", "forward_to": "test@example.com", "batch_operation": true, "count": "3"}}
-- "删除前5封邮件" → {{"email_id": "1", "batch_operation": true, "count": "5"}}
-- "归档最近3封邮件到工作文件夹" → {{"email_id": "1", "folder_name": "工作文件夹", "batch_operation": true, "count": "3"}}
-- "删除那个重要的邮件" → {{"email_id": "latest", "batch_operation": false}}
-- "把邮件归档到工作文件夹" → {{"email_id": "latest", "folder_name": "工作文件夹", "batch_operation": false}}"""
-        
-        messages = [
-            {"role": "system", "content": "你是一个专业的参数提取助手，擅长从自然语言中提取结构化参数。"},
-            {"role": "user", "content": prompt}
-        ]
-        
-        response = self.deepseek_api._make_request(
-            messages,
-            temperature=0.3,
-            max_tokens=Config.INTENT_MAX_TOKENS
-        )
-        
-        if response:
-            try:
-                # 提取JSON内容
-                start_idx = response.find('{')
-                end_idx = response.rfind('}') + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = response[start_idx:end_idx]
-                    result = json.loads(json_str)
-                    
-                    # 根据意图添加特定参数
-                    if intent == 'forward_email' and 'email_address' in result:
-                        result['forward_to'] = result['email_address']
-                    
-                    if intent == 'list_emails' and 'count' not in result:
-                        result['count'] = 10  # 默认显示10封
-                    
-                    return result
-                else:
-                    return {}
-                    
-            except json.JSONDecodeError as e:
-                return {}
-        
-        return {}
     
     def get_intent_description(self, intent: str) -> str:
         """
@@ -430,26 +539,38 @@ def validate_parameters(intent: str, parameters: Dict[str, Any]) -> tuple[bool, 
 
 if __name__ == '__main__':
     # 测试代码
-    print("测试自然语言理解模块...\n")
+    print("测试自然语言理解模块（混合提取策略）...\n")
     
     # 测试用例
     test_cases = [
+        # 单个邮件操作
+        "回复邮件123",
+        "转发第一封邮件到test@example.com",
+        "删除最新的邮件",
+        
+        # 多收件人
+        "转发邮件1到user1@example.com和user2@example.com",
+        "把邮件2转给test@domain.com、admin@site.com",
+        
+        # 批量操作
+        "转发前三封邮件到admin@example.com",
+        "删除最近5封邮件",
+        "归档前10封邮件到工作文件夹",
+        "总结最近3封邮件",
+        
+        # 复杂邮箱地址
+        "转发邮件到2023111753@stu.sufe.edu.cn",
+        "把邮件1转给user.name+tag@sub.domain.com",
+        
+        # 列表形式
         "回复邮件1,2,3",
-        "把邮件4,5,6归档到工作文件夹",
-        "删除第5封邮件",
-        "转发邮件7,8,9到2023111753.stu.sufe.edu.cn",
-        "标记邮件111为已读",
-        "总结最新的邮件",
-        "分析邮件222的优先级",
-        "列出最近10封邮件",
-        "搜索关于项目的邮件",
-        "帮我处理一下邮件"  # 模糊输入
+        "删除邮件5,6,7,8"
     ]
     
     for i, test_input in enumerate(test_cases, 1):
-        print(f"{'='*60}")
+        print(f"{'='*70}")
         print(f"测试 {i}: {test_input}")
-        print(f"{'='*60}")
+        print(f"{'='*70}")
         
         result = parse_task(test_input)
         
