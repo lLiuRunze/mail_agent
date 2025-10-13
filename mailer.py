@@ -635,6 +635,285 @@ Subject: {original_email['subject']}
         """上下文管理器出口"""
         self.disconnect_imap()
         self.disconnect_smtp()
+    def get_emails_by_ids(self, email_ids: List[str], folder: str = None) -> List[Dict[str, Any]]:
+        """
+        批量获取多封邮件
+        
+        Args:
+            email_ids: 邮件ID列表
+            folder: 邮件文件夹，默认为收件箱
+            
+        Returns:
+            List[Dict[str, Any]]: 邮件信息列表
+        """
+        if not self.imap_connection:
+            if not self.connect_imap():
+                return []
+        
+        try:
+            folder = folder or Config.DEFAULT_FOLDER
+            self.imap_connection.select(folder)
+            
+            emails = []
+            for email_id in email_ids:
+                email_info = self.get_email(email_id)
+                if email_info:
+                    email_info['original_uid'] = email_id
+                    emails.append(email_info)
+            
+            return emails
+            
+        except Exception as e:
+            print(f"✗ 批量获取邮件异常: {str(e)}")
+            return []
+    
+    def get_emails_by_indices(self, indices: List[int], count: int = 50, folder: str = None) -> List[Dict[str, Any]]:
+        """
+        根据时间排序的索引列表批量获取邮件
+        
+        Args:
+            indices: 时间排序的索引列表（从1开始）
+            count: 获取的邮件总数（用于确保索引在范围内）
+            folder: 邮件文件夹，默认为收件箱
+            
+        Returns:
+            List[Dict[str, Any]]: 邮件信息列表
+        """
+        # 获取足够多的邮件以确保所有索引都在范围内
+        max_index = max(indices) if indices else 0
+        emails = self.get_recent_emails(count=max(count, max_index), folder=folder)
+        
+        if not emails:
+            return []
+        
+        # 根据索引提取邮件
+        result = []
+        for index in indices:
+            if 1 <= index <= len(emails):
+                result.append(emails[index - 1])
+        
+        return result
+    
+    def batch_forward_email(self, original_email: Dict[str, Any], recipients: List[str]) -> Dict[str, Any]:
+        """
+        批量转发邮件到多个收件人
+        
+        Args:
+            original_email: 原始邮件信息
+            recipients: 收件人列表
+            
+        Returns:
+            Dict[str, Any]: 包含成功和失败信息的字典
+        """
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for recipient in recipients:
+            try:
+                # 为每个收件人重新建立SMTP连接（避免连接超时）
+                if self.smtp_connection:
+                    self.disconnect_smtp()
+                
+                success = self.forward_email(original_email, recipient)
+                if success:
+                    success_count += 1
+                    results.append({
+                        'recipient': recipient,
+                        'status': 'success'
+                    })
+                else:
+                    failed_count += 1
+                    results.append({
+                        'recipient': recipient,
+                        'status': 'failed'
+                    })
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'recipient': recipient,
+                    'status': f'error: {str(e)}'
+                })
+        
+        return {
+            'total': len(recipients),
+            'success': success_count,
+            'failed': failed_count,
+            'results': results
+        }
+    
+    def batch_archive_emails(self, email_ids: List[str], folder_name: str) -> Dict[str, Any]:
+        """
+        批量归档多封邮件
+        
+        Args:
+            email_ids: 邮件ID列表
+            folder_name: 目标文件夹名称
+            
+        Returns:
+            Dict[str, Any]: 包含成功和失败信息的字典
+        """
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for email_id in email_ids:
+            try:
+                success = self.archive_email_to_folder(email_id, folder_name)
+                if success:
+                    success_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'archived'
+                    })
+                else:
+                    failed_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'failed'
+                    })
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'email_id': email_id,
+                    'status': f'error: {str(e)}'
+                })
+        
+        return {
+            'total': len(email_ids),
+            'success': success_count,
+            'failed': failed_count,
+            'results': results
+        }
+    
+    def batch_delete_emails(self, email_ids: List[str]) -> Dict[str, Any]:
+        """
+        批量删除多封邮件
+        
+        Args:
+            email_ids: 邮件ID列表
+            
+        Returns:
+            Dict[str, Any]: 包含成功和失败信息的字典
+        """
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for email_id in email_ids:
+            try:
+                success = self.delete_email(email_id)
+                if success:
+                    success_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'deleted'
+                    })
+                else:
+                    failed_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'failed'
+                    })
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'email_id': email_id,
+                    'status': f'error: {str(e)}'
+                })
+        
+        return {
+            'total': len(email_ids),
+            'success': success_count,
+            'failed': failed_count,
+            'results': results
+        }
+    
+    def batch_mark_as_read(self, email_ids: List[str]) -> Dict[str, Any]:
+        """
+        批量标记邮件为已读
+        
+        Args:
+            email_ids: 邮件ID列表
+            
+        Returns:
+            Dict[str, Any]: 包含成功和失败信息的字典
+        """
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for email_id in email_ids:
+            try:
+                success = self.mark_email_as_read(email_id)
+                if success:
+                    success_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'marked_read'
+                    })
+                else:
+                    failed_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'failed'
+                    })
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'email_id': email_id,
+                    'status': f'error: {str(e)}'
+                })
+        
+        return {
+            'total': len(email_ids),
+            'success': success_count,
+            'failed': failed_count,
+            'results': results
+        }
+    
+    def batch_mark_as_unread(self, email_ids: List[str]) -> Dict[str, Any]:
+        """
+        批量标记邮件为未读
+        
+        Args:
+            email_ids: 邮件ID列表
+            
+        Returns:
+            Dict[str, Any]: 包含成功和失败信息的字典
+        """
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for email_id in email_ids:
+            try:
+                success = self.mark_email_as_unread(email_id)
+                if success:
+                    success_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'marked_unread'
+                    })
+                else:
+                    failed_count += 1
+                    results.append({
+                        'email_id': email_id,
+                        'status': 'failed'
+                    })
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'email_id': email_id,
+                    'status': f'error: {str(e)}'
+                })
+        
+        return {
+            'total': len(email_ids),
+            'success': success_count,
+            'failed': failed_count,
+            'results': results
+        }
 
 
 # 创建全局邮件客户端实例
@@ -666,6 +945,39 @@ def delete_email(email_id: str) -> bool:
 def forward_email(email: Dict[str, Any], forward_to: str) -> bool:
     """转发邮件（便捷函数）"""
     return email_client.forward_email(email, forward_to)
+def get_emails_by_ids(email_ids: List[str]) -> List[Dict[str, Any]]:
+    """批量获取邮件（便捷函数）"""
+    return email_client.get_emails_by_ids(email_ids)
+
+
+def get_emails_by_indices(indices: List[int]) -> List[Dict[str, Any]]:
+    """根据索引批量获取邮件（便捷函数）"""
+    return email_client.get_emails_by_indices(indices)
+
+
+def batch_forward_email(email: Dict[str, Any], recipients: List[str]) -> Dict[str, Any]:
+    """批量转发邮件（便捷函数）"""
+    return email_client.batch_forward_email(email, recipients)
+
+
+def batch_archive_emails(email_ids: List[str], folder_name: str) -> Dict[str, Any]:
+    """批量归档邮件（便捷函数）"""
+    return email_client.batch_archive_emails(email_ids, folder_name)
+
+
+def batch_delete_emails(email_ids: List[str]) -> Dict[str, Any]:
+    """批量删除邮件（便捷函数）"""
+    return email_client.batch_delete_emails(email_ids)
+
+
+def batch_mark_as_read(email_ids: List[str]) -> Dict[str, Any]:
+    """批量标记已读（便捷函数）"""
+    return email_client.batch_mark_as_read(email_ids)
+
+
+def batch_mark_as_unread(email_ids: List[str]) -> Dict[str, Any]:
+    """批量标记未读（便捷函数）"""
+    return email_client.batch_mark_as_unread(email_ids)
 
 
 if __name__ == '__main__':
