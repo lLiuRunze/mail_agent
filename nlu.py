@@ -30,6 +30,7 @@ class NLUEngine:
             'analyze_priority': '分析优先级',
             'move_email': '移动邮件',
             'generate_reply': '生成回复',
+            'send_generated_reply': '发送自动回复',
             'list_emails': '列出邮件',
             'search_email': '搜索邮件',
             'unknown': '未知意图'
@@ -47,6 +48,7 @@ class NLUEngine:
             'analyze_priority': ['优先级', '紧急', '重要', 'priority', 'urgent'],
             'move_email': ['移动', '移到', 'move'],
             'generate_reply': ['生成回复', '自动回复', 'generate reply'],
+            'send_generated_reply': ['发送自动回复', '发送生成的回复', '发送刚才的回复', '发送草稿', 'send generated reply'],
             'list_emails': ['列出', '显示', '查看邮件', 'list', 'show'],
             'search_email': ['搜索', '查找', 'search', 'find']
         }
@@ -90,18 +92,25 @@ class NLUEngine:
         """
         user_input_lower = user_input.lower()
         
-        # 遍历所有意图关键词
+        # 选择“匹配到的最长关键词”对应的意图，避免短词（如 reply）误伤更长短语（如 send generated reply）
+        best_intent = None
+        best_keyword_len = -1
         for intent, keywords in self.intent_keywords.items():
             for keyword in keywords:
-                if keyword in user_input_lower:
-                    # 混合提取参数（正则 + DeepSeek）
-                    parameters = self._extract_parameters_hybrid(user_input, intent)
-                    return {
-                        'intent': intent,
-                        'parameters': parameters,
-                        'confidence': 0.8,
-                        'original_input': user_input
-                    }
+                kw = keyword.lower()
+                if kw in user_input_lower:
+                    if len(kw) > best_keyword_len:
+                        best_keyword_len = len(kw)
+                        best_intent = intent
+        
+        if best_intent:
+            parameters = self._extract_parameters_hybrid(user_input, best_intent)
+            return {
+                'intent': best_intent,
+                'parameters': parameters,
+                'confidence': 0.8,
+                'original_input': user_input
+            }
         
         return {
             'intent': 'unknown',

@@ -47,6 +47,8 @@ class EmailAgent:
    - 回复邮件1
    - 回复第一封邮件
    - 回复最新的邮件
+   - 发送自动回复（发送刚才生成的草稿）
+   - 发送自动回复给第一封邮件（指定ID发送）
    
 {Fore.GREEN}2. 邮件归档：{Style.RESET_ALL}
    - 归档邮件2
@@ -73,6 +75,10 @@ class EmailAgent:
 {Fore.GREEN}7. 优先级分析：{Style.RESET_ALL}
    - 分析邮件2的优先级
    - 检查第一封邮件是否紧急
+      
+{Fore.GREEN}8. 发送自动回复：{Style.RESET_ALL}
+   - 发送自动回复（若未指定则发送最近生成的草稿）
+   - 发送自动回复给第一封邮件
 
 {Fore.YELLOW}【批量操作】{Style.RESET_ALL}
 
