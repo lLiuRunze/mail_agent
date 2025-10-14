@@ -85,33 +85,13 @@ class EmailClient:
                     self.smtp_server,
                     self.smtp_port
                 )
-                # EHLO 对部分服务商是必须的
-                try:
-                    self.smtp_connection.ehlo()
-                except Exception:
-                    pass
             else:
                 self.smtp_connection = smtplib.SMTP(
                     self.smtp_server,
                     self.smtp_port
                 )
-                try:
-                    self.smtp_connection.ehlo()
-                except Exception:
-                    pass
                 if Config.SMTP_USE_TLS:
-                    # 一些服务器要求在 STARTTLS 前后各执行一次 EHLO
                     self.smtp_connection.starttls()
-                    try:
-                        self.smtp_connection.ehlo()
-                    except Exception:
-                        pass
-            # 根据调试标志输出 SMTP 交互日志
-            try:
-                if Config.DEBUG_MODE:
-                    self.smtp_connection.set_debuglevel(1)
-            except Exception:
-                pass
             
             # 登录
             self.smtp_connection.login(self.email_account, self.email_password)
@@ -405,47 +385,16 @@ class EmailClient:
             msg['From'] = self.email_account
             msg['To'] = original_email['from']
             msg['Subject'] = f"Re: {original_email['subject']}"
-            # 追加线程头，提升投递与归类效果
-            try:
-                raw_msg = original_email.get('raw_message')
-                if raw_msg:
-                    orig_msg_id = raw_msg.get('Message-ID')
-                    orig_refs = raw_msg.get('References')
-                    if orig_msg_id:
-                        msg['In-Reply-To'] = orig_msg_id
-                        msg['References'] = (f"{orig_refs} {orig_msg_id}".strip() if orig_refs else orig_msg_id)
-            except Exception:
-                # 非关键字段，失败忽略
-                pass
             
             # 添加回复内容
             msg.attach(MIMEText(reply_content, 'plain', 'utf-8'))
             
             # 发送邮件
             recipients = [original_email['from']]
-            result = self.smtp_connection.sendmail(self.email_account, recipients, msg.as_string())
-            # sendmail 返回非空 dict 代表失败列表
-            if result:
-                for rcpt, err in result.items():
-                    print(f"✗ 收件人被拒收: {rcpt} -> {err}")
-                return False
+            self.smtp_connection.sendmail(self.email_account, recipients, msg.as_string())
             print(f"✓ 回复邮件已发送到: {original_email['from']}")
             return True
             
-        except smtplib.SMTPRecipientsRefused as e:
-            try:
-                for rcpt, detail in getattr(e, 'recipients', {}).items():
-                    print(f"✗ 收件人被拒收: {rcpt} -> {detail}")
-            except Exception:
-                pass
-            print(f"✗ 发送回复失败: {str(e)}")
-            return False
-        except smtplib.SMTPSenderRefused as e:
-            print(f"✗ 发件人被拒绝: {e.sender} -> {(e.smtp_code, e.smtp_error)}")
-            return False
-        except smtplib.SMTPDataError as e:
-            print(f"✗ 服务器拒收数据: {(e.smtp_code, e.smtp_error)}")
-            return False
         except Exception as e:
             print(f"✗ 发送回复失败: {str(e)}")
             return False

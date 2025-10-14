@@ -18,9 +18,6 @@ class TaskExecutor:
         """初始化任务执行器"""
         self.email_client = mailer.EmailClient()
         self.deepseek_api = deepseek.DeepSeekAPI()
-        # 缓存：保存最近为某封邮件生成的自动回复（按不可变UID索引）
-        # 结构：{ uid: { 'reply_content': str, 'subject': str, 'from': str, 'index': int|None, 'created_at': float } }
-        self.generated_reply_cache: dict[str, dict] = {}
         
         # 任务处理函数映射
         self.task_handlers = {
@@ -34,7 +31,6 @@ class TaskExecutor:
             'analyze_priority': self.analyze_email_priority,
             'move_email': self.move_email_to_folder,
             'generate_reply': self.generate_auto_reply,
-            'send_generated_reply': self.send_generated_reply,
             'list_emails': self.list_recent_emails,
             'search_email': self.search_emails
         }
@@ -134,33 +130,14 @@ class TaskExecutor:
                 'data': None
             }
         
-        # 如果没有提供自定义回复：仅生成并返回供审核，不发送
+        # 如果没有提供自定义回复，则生成自动回复
         if not custom_reply:
             print("→ 正在生成自动回复...")
-            auto_reply = self.deepseek_api.generate_reply(email_info['body'])
-            # 使用原始IMAP UID作为稳定键，避免时间索引变化导致错发
-            from time import time as _now
-            uid_key = email_info.get('original_uid') or email_info.get('id') or str(email_id)
-            if uid_key:
-                self.generated_reply_cache[uid_key] = {
-                    'reply_content': auto_reply,
-                    'subject': email_info.get('subject', ''),
-                    'from': email_info.get('from', ''),
-                    'index': email_info.get('index'),
-                    'created_at': _now()
-                }
-            return {
-                'success': True,
-                'message': '已生成自动回复（未发送），请审核后决定是否发送',
-                'data': {
-                    'email_id': email_id,
-                    'subject': email_info['subject'],
-                    'reply_content': auto_reply
-                }
-            }
+            custom_reply = self.deepseek_api.generate_reply(email_info['body'])
         
-        # 提供了自定义回复内容：执行发送
+        # 发送回复
         success = self.email_client.send_reply(email_info, custom_reply)
+        
         if success:
             return {
                 'success': True,
@@ -175,96 +152,6 @@ class TaskExecutor:
             return {
                 'success': False,
                 'message': '回复邮件失败',
-                'data': None
-            }
-
-    def send_generated_reply(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        发送最近为某封邮件生成并缓存的自动回复
-        
-        Args:
-            parameters: 可包含 email_id（可选，不传则尝试使用最近一次缓存）
-        
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
-        email_id = parameters.get('email_id')
-        email_info = None
-        uid_key = None
-
-        # 选择缓存项：优先指定 email_id，否则按创建时间选择最新的
-        if email_id:
-            # 尝试解析邮件以获得其 UID
-            email_info = self._get_email_by_id(email_id)
-            if not email_info:
-                return {
-                    'success': False,
-                    'message': f'未找到邮件: {email_id}',
-                    'data': None
-                }
-            uid_key = email_info.get('original_uid') or email_info.get('id') or str(email_id)
-        else:
-            if not self.generated_reply_cache:
-                return {
-                    'success': False,
-                    'message': '没有可发送的自动回复草稿，请先生成自动回复',
-                    'data': None
-                }
-            # 选择 created_at 最大的缓存项
-            uid_key = max(self.generated_reply_cache.items(), key=lambda kv: kv[1].get('created_at', 0))[0]
-
-        if not uid_key or uid_key not in self.generated_reply_cache:
-            return {
-                'success': False,
-                'message': '未找到对应的自动回复草稿，请先生成自动回复',
-                'data': None
-            }
-        
-        # 使用稳定 UID 精确获取原邮件，避免“第1封”随时间变化
-        if not email_info:
-            # 直接用 IMAP UID 获取
-            try:
-                email_info = self.email_client.get_email(uid_key)
-            except Exception:
-                email_info = None
-        
-        cache_entry = self.generated_reply_cache[uid_key]
-        reply_content = cache_entry.get('reply_content', '')
-
-        # 若仍无法获取原邮件，使用快照信息构造最小 email_info 发送（无线程头）
-        if not email_info:
-            email_info = {
-                'from': cache_entry.get('from', ''),
-                'subject': cache_entry.get('subject', ''),
-            }
-        
-        # 简单提醒：noreply 地址可能无法接收
-        try:
-            recipient = (email_info.get('from') or '').lower()
-            if 'noreply' in recipient or 'no-reply' in recipient:
-                print("提示: 目标似为 noreply 地址，可能不会接收回复。")
-        except Exception:
-            pass
-
-        success = self.email_client.send_reply(email_info, reply_content)
-        if success:
-            # 发送成功后移除缓存，避免重复发送
-            try:
-                del self.generated_reply_cache[uid_key]
-            except KeyError:
-                pass
-            return {
-                'success': True,
-                'message': f'已发送自动回复: {email_info.get("subject", "")} ',
-                'data': {
-                    'email_id': email_info.get('id') or uid_key or email_id,
-                    'subject': email_info.get('subject', '')
-                }
-            }
-        else:
-            return {
-                'success': False,
-                'message': '发送自动回复失败',
                 'data': None
             }
     
