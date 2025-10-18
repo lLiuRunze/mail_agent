@@ -49,7 +49,6 @@ DEEPSEEK_API_KEY=your_deepseek_api_key
 1. 开启 SMTP 服务
 2. 生成授权码（不是登录密码）
 3. 使用授权码作为 `EMAIL_PASSWORD`
-
 #### Gmail 配置
 1. 开启两步验证
 2. 生成应用专用密码
@@ -110,3 +109,9 @@ python agent.py
 - 确认 DeepSeek API 密钥有效
 - 检查 API 配额和限制
 - 验证网络连接
+
+
+## todo list
+
+- 实现多个邮箱使用同一个agent
+- cypht前端结合 
