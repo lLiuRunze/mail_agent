@@ -33,6 +33,7 @@ class NLUEngine:
             "generate_reply": "生成回复",
             "list_emails": "列出邮件",
             "search_email": "搜索邮件",
+            "compose_email": "撰写邮件",
             "unknown": "未知意图",
         }
 
@@ -50,6 +51,7 @@ class NLUEngine:
             "generate_reply": ["生成回复", "自动回复", "generate reply"],
             "list_emails": ["列出", "显示", "查看邮件", "list", "show"],
             "search_email": ["搜索", "查找", "search", "find"],
+            "compose_email": ["写邮件", "撰写邮件", "发邮件", "发送邮件", "compose", "send email"],
         }
 
         self.email_pattern = re.compile(
@@ -315,6 +317,15 @@ class NLUEngine:
             if "email_address" in parameters and "forward_to" not in parameters:
                 parameters["forward_to"] = parameters["email_address"]
 
+        # 特殊处理：compose_email 参数映射
+        if intent == "compose_email":
+            # 将 email_address 映射到 to_addr（任务执行器需要）
+            if "email_address" in parameters:
+                parameters["to_addr"] = parameters["email_address"]
+            # 确保 content_prompt 参数存在（任务执行器需要）
+            if "content" in parameters and "content_prompt" not in parameters:
+                parameters["content_prompt"] = parameters["content"]
+
         return parameters
 
     def analyze_intent(self, user_input: str) -> Dict[str, Any]:
@@ -458,6 +469,7 @@ class NLUEngine:
             "generate_reply": ["email_id"],
             "list_emails": [],
             "search_email": ["content"],
+            "compose_email": ["email_address", "content"],
         }
 
         if intent not in required_params:

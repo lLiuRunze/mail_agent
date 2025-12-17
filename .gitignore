@@ -33,6 +33,6 @@ venv/
 # IDE
 .vscode/
 .idea/
-
+.claude/
 # UV
 uv.lock

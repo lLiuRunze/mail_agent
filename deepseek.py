@@ -271,6 +271,74 @@ class DeepSeekAPI:
             "suggested_action": "正常处理",
         }
 
+    def generate_email_subject(self, content_prompt: str) -> str:
+        """
+        根据内容提示生成邮件主题
+
+        Args:
+            content_prompt: 内容提示或要点
+
+        Returns:
+            str: 生成的邮件主题
+        """
+        prompt = f"""请根据以下内容提示生成一个合适的邮件主题：
+
+内容提示：
+{content_prompt}
+
+要求：
+1. 主题要简洁明了，不超过10个字
+2. 能准确反映邮件内容
+3. 不需要添加"主题："等前缀
+4. 直接给出主题文本"""
+
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个专业的邮件助手，擅长撰写邮件主题。"
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        response = self._make_request(messages, temperature=0.7, max_tokens=50)
+        return response if response else "新邮件"
+
+    def generate_email_content(self, content_prompt: str) -> str:
+        """
+        根据内容提示生成完整的邮件内容
+
+        Args:
+            content_prompt: 内容提示或要点
+
+        Returns:
+            str: 生成的邮件内容
+        """
+        prompt = f"""请根据以下内容提示撰写一封完整的邮件：
+
+内容提示/要点：
+{content_prompt}
+
+要求：
+1. 邮件内容要完整、专业、得体
+2. 包含适当的问候语和结尾
+3. 语气要礼貌自然
+4. 直接给出邮件正文，不需要添加"邮件内容："等前缀"""
+
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个专业的邮件撰写助手，擅长撰写各种类型的邮件。"
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        response = self._make_request(
+            messages,
+            temperature=Config.REPLY_TEMPERATURE,
+            max_tokens=Config.REPLY_MAX_TOKENS
+        )
+        return response if response else f"您好，\n\n根据您的提示：{content_prompt}，这是一封邮件。\n\n此致\n敬礼"
+
     def _get_default_analysis(self) -> Dict[str, Any]:
         """
         返回默认的邮件分析结果
@@ -346,6 +414,32 @@ def analyze_priority(email_content: str, sender: str = "") -> Dict[str, Any]:
         Dict[str, Any]: 优先级分析结果
     """
     return deepseek_api.analyze_priority(email_content, sender)
+
+
+def generate_email_subject(content_prompt: str) -> str:
+    """
+    生成邮件主题（便捷函数）
+
+    Args:
+        content_prompt: 内容提示或要点
+
+    Returns:
+        str: 生成的邮件主题
+    """
+    return deepseek_api.generate_email_subject(content_prompt)
+
+
+def generate_email_content(content_prompt: str) -> str:
+    """
+    生成邮件内容（便捷函数）
+
+    Args:
+        content_prompt: 内容提示或要点
+
+    Returns:
+        str: 生成的邮件内容
+    """
+    return deepseek_api.generate_email_content(content_prompt)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,31 @@ from config import Config
 class TaskExecutor:
     """任务执行器类"""
 
+    # 不可回复的系统地址模式
+    _NON_REPLYABLE_ADDRESSES = {
+        "10000@qq.com",
+        "no-reply@",
+        "noreply@",
+        "donotreply@",
+        "do-not-reply@",
+        "notification@",
+        "notifications@",
+        "alert@",
+        "alerts@",
+        "info@",
+        "support@",
+        "help@",
+        "admin@",
+        "administrator@",
+        "mailer-daemon@",
+        "postmaster@",
+        "root@",
+        "server@",
+        "system@",
+        "auto@",
+        "automated@",
+    }
+
     def __init__(self):
         """初始化任务执行器"""
         self.email_client = mailer.EmailClient()
@@ -34,6 +59,7 @@ class TaskExecutor:
             "generate_reply": self.generate_auto_reply,
             "list_emails": self.list_recent_emails,
             "search_email": self.search_emails,
+            "compose_email": self.compose_email,
         }
 
     def execute_task(self, intent: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,12 +148,63 @@ class TaskExecutor:
         email_id = parameters.get("email_id")
         custom_reply = parameters.get("reply_content")
 
-        # 获取原始邮件
-        email_info = self._get_email_by_id(email_id)
-        if not email_info:
+        # 获取原始邮件，如果不可回复则尝试后续邮件
+        original_email_id = email_id
+        max_attempts = 5
+        # 如果email_id不是数字（如"latest"），只尝试一次
+        if not original_email_id.isdigit():
+            max_attempts = 1
+        attempt = 0
+        found_replyable = False
+        email_info = None
+
+        while attempt < max_attempts:
+            if original_email_id.isdigit():
+                current_email_id = str(int(original_email_id) + attempt)
+            else:
+                current_email_id = original_email_id
+            email_info = self._get_email_by_id(current_email_id)
+            if not email_info:
+                break
+
+            # 检查是否是可回复的地址
+            from_address = email_info.get("from", "").lower()
+            is_non_replyable = False
+            for pattern in self._NON_REPLYABLE_ADDRESSES:
+                if pattern.endswith("@"):
+                    # 前缀模式，如 "no-reply@"
+                    if from_address.startswith(pattern):
+                        is_non_replyable = True
+                        break
+                else:
+                    # 完整地址匹配
+                    if from_address == pattern:
+                        is_non_replyable = True
+                        break
+
+            if not is_non_replyable:
+                found_replyable = True
+                # 记录我们实际回复的邮件
+                if attempt > 0:
+                    print(f"→ 邮件 {original_email_id} 不可回复，已自动选择邮件 {current_email_id}")
+                break
+            else:
+                attempt += 1
+                # 继续尝试下一封邮件
+
+        if not email_info or not found_replyable:
+            # 获取最近的邮件列表，供用户选择
+            recent_emails = self.email_client.get_recent_emails(count=5)
+            email_list = []
+            for i, email in enumerate(recent_emails, 1):
+                from_addr = email.get("from", "未知")
+                subject = email.get("subject", "无主题")
+                email_list.append(f"{i}. {subject} (来自: {from_addr})")
+
+            message = f"无法回复邮件: {original_email_id}。该地址可能无法接收回复。\n\n最近的邮件列表:\n" + "\n".join(email_list)
             return {
                 "success": False,
-                "message": f"未找到邮件: {email_id}",
+                "message": message,
                 "data": None,
             }
 
@@ -1029,6 +1106,66 @@ class TaskExecutor:
                 "message": f'未找到包含 "{search_content}" 的邮件',
                 "data": None,
             }
+
+    def compose_email(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        撰写并发送新邮件任务
+
+        Args:
+            parameters: 包含 to_addr, subject, content_prompt/content, cc, bcc 等
+
+        Returns:
+            Dict[str, Any]: 执行结果
+        """
+        to_addr = parameters.get("to_addr")
+        subject = parameters.get("subject")
+        content_prompt = parameters.get("content_prompt") or parameters.get("content")
+        cc = parameters.get("cc", [])
+        bcc = parameters.get("bcc", [])
+
+        if not to_addr:
+            return {"success": False, "message": "缺少收件人邮箱地址", "data": None}
+
+        # 如果没有提供主题，生成一个
+        if not subject:
+            print("→ 正在生成邮件主题...")
+            # 使用deepseek API根据内容提示生成主题
+            if content_prompt:
+                subject = self.deepseek_api.generate_email_subject(content_prompt)
+            else:
+                subject = "新邮件"
+
+        # 如果没有提供内容，根据内容提示生成
+        if not content_prompt:
+            return {"success": False, "message": "缺少邮件内容或内容提示", "data": None}
+
+        print("→ 正在生成邮件内容...")
+        # 使用deepseek API根据内容提示生成完整邮件内容
+        email_content = self.deepseek_api.generate_email_content(content_prompt)
+
+        # 发送邮件
+        success = self.email_client.send_email(
+            to_addr=to_addr,
+            subject=subject,
+            content=email_content,
+            cc=cc if isinstance(cc, list) else [cc] if cc else [],
+            bcc=bcc if isinstance(bcc, list) else [bcc] if bcc else []
+        )
+
+        if success:
+            return {
+                "success": True,
+                "message": f"邮件已发送到: {to_addr}",
+                "data": {
+                    "to_addr": to_addr,
+                    "subject": subject,
+                    "content": email_content,
+                    "cc": cc,
+                    "bcc": bcc,
+                },
+            }
+        else:
+            return {"success": False, "message": "发送邮件失败", "data": None}
 
 
 # 创建全局任务执行器实例
