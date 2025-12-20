@@ -40,9 +40,9 @@ class TaskExecutor:
         "automated@",
     }
 
-    def __init__(self):
+    def __init__(self, email_client: Optional[mailer.EmailClient] = None):
         """初始化任务执行器"""
-        self.email_client = mailer.EmailClient()
+        self.email_client = email_client or mailer.EmailClient()
         self.deepseek_api = deepseek.DeepSeekAPI()
 
         # 任务处理函数映射
