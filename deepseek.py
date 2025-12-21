@@ -354,6 +354,43 @@ class DeepSeekAPI:
             "summary": "无法分析邮件内容",
         }
 
+    def chat(self, user_message: str, system_prompt: str = None) -> str:
+        """
+        通用聊天接口，用于生成自然语言回复
+
+        Args:
+            user_message: 用户消息或提示词
+            system_prompt: 可选的系统提示词
+
+        Returns:
+            str: AI 生成的回复
+        """
+        messages = []
+        
+        if system_prompt:
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+        else:
+            messages.append({
+                "role": "system",
+                "content": "你是一个友好、专业的智能邮件助手。"
+            })
+        
+        messages.append({
+            "role": "user",
+            "content": user_message
+        })
+        
+        response = self._make_request(
+            messages,
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        return response if response else "抱歉，我现在无法回复。请稍后再试。"
+
 
 # 创建全局 API 实例
 deepseek_api = DeepSeekAPI()

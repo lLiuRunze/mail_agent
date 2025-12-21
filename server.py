@@ -69,6 +69,7 @@ class EmailOperationRequest(BaseModel):
     email_id: Optional[str] = None
     email_ids: Optional[List[str]] = None
     content: Optional[str] = None
+    sender: Optional[str] = None
     to: Optional[List[str]] = None
     subject: Optional[str] = None
     folder: Optional[str] = None
@@ -219,6 +220,9 @@ async def chat(request: ChatRequest):
         nlu_result = nlu_engine.parse_task(user_input)
         intent = nlu_result.get("intent", "unknown")
         parameters = nlu_result.get("parameters", {})
+        # 保存用户原始输入，供 unknown 意图处理使用
+        if "user_input" not in parameters:
+            parameters["user_input"] = user_input
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"NLU Error: {str(e)}")
 
@@ -352,6 +356,53 @@ async def send_email(request: SendEmailRequest):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error sending email: {str(e)}")
+
+@app.post("/api/generate/compose")
+async def generate_compose_content(request: EmailOperationRequest):
+    """生成新邮件的内容（预览阶段）"""
+    if not task_executors:
+        raise HTTPException(status_code=401, detail="Please login first")
+
+    target_email = request.email
+    if not target_email:
+        if len(task_executors) == 1:
+            target_email = list(task_executors.keys())[0]
+        else:
+            target_email = list(task_executors.keys())[0]
+    
+    if target_email not in task_executors:
+        raise HTTPException(status_code=404, detail=f"Account {target_email} not logged in")
+
+    executor = task_executors[target_email]
+    
+    if not request.to:
+        raise HTTPException(status_code=400, detail="Missing required field: to")
+    
+    try:
+        to_addr = request.to[0] if isinstance(request.to, list) else request.to
+        content_prompt = request.content or ""
+        subject = request.subject
+        
+        # 如果没有主题，使用 AI 生成
+        if not subject and content_prompt:
+            subject = executor.deepseek_api.generate_email_subject(content_prompt)
+        elif not subject:
+            subject = "新邮件"
+        
+        # 使用 AI 生成完整邮件内容
+        if content_prompt:
+            email_content = executor.deepseek_api.generate_email_content(content_prompt)
+        else:
+            email_content = ""
+        
+        return {
+            "success": True,
+            "to": to_addr,
+            "subject": subject,
+            "content": email_content
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/compose")
 async def compose_email(request: EmailOperationRequest):
@@ -533,17 +584,6 @@ async def analyze_priority(email_id: str, request: EmailOperationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing priority: {str(e)}")
 
-@app.post("/api/emails/{email_id}/classify")
-async def classify_email(email_id: str, request: EmailOperationRequest):
-    """Classify email content and return category, sentiment, urgency, etc."""
-    executor = _get_executor(request.email)
-    try:
-        params = {"email_id": email_id}
-        result = executor.execute_task("classify_email", params)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error classifying email: {str(e)}")
-
 @app.post("/api/emails/{email_id}/generate-reply")
 async def generate_reply(email_id: str, request: EmailOperationRequest):
     """Generate automatic reply content"""
@@ -622,19 +662,102 @@ async def batch_summarize(request: EmailOperationRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error batch summarizing: {str(e)}")
 
+@app.post("/api/emails/batch/classify")
+async def batch_classify(request: EmailOperationRequest):
+    """Batch classify emails - returns classifications for all specified emails"""
+    executor = _get_executor(request.email)
+    try:
+        if not request.email_ids:
+            raise HTTPException(status_code=400, detail="email_ids is required for batch classification")
+        
+        params = {"email_ids": request.email_ids}
+        result = executor.execute_task("batch_classify", params)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error batch classifying: {str(e)}")
+
 @app.post("/api/emails/search")
 async def search_emails(request: EmailOperationRequest):
-    """Search emails by query"""
+    """Search emails by content and/or sender"""
     executor = _get_executor(request.email)
     try:
         params = {
-            "search_content": request.query,
-            "count": request.count or 20
+            "content": request.content,
+            "sender": request.sender,
+            "count": request.count or 50
         }
         result = executor.execute_task("search_email", params)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching emails: {str(e)}")
+
+@app.post("/api/emails/detail")
+async def get_email_detail(request: EmailOperationRequest):
+    """Get email detail by ID"""
+    executor = _get_executor(request.email)
+    try:
+        params = {
+            "email_id": request.email_id
+        }
+        result = executor.execute_task("get_email_detail", params)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting email detail: {str(e)}")
+
+# ==================== 用户配置管理接口 ====================
+
+# 存储用户配置（内存中，可以改为数据库）
+user_profiles: Dict[str, Dict[str, Any]] = {}
+
+class ProfileRequest(BaseModel):
+    email: str
+    display_name: Optional[str] = ""
+    avatar: Optional[str] = ""
+    signature: Optional[str] = ""
+    reply_tone: Optional[str] = "正式"
+    auto_reply_enabled: Optional[bool] = False
+
+@app.get("/api/profile")
+async def get_profile(email: str):
+    """获取用户配置"""
+    if email not in task_executors:
+        raise HTTPException(status_code=404, detail=f"Account {email} not logged in")
+    
+    # 如果没有配置，返回默认值
+    if email not in user_profiles:
+        user_profiles[email] = {
+            "display_name": "",
+            "avatar": "",
+            "signature": "",
+            "reply_tone": "正式",
+            "auto_reply_enabled": False
+        }
+    
+    return {
+        "success": True,
+        "profile": user_profiles[email]
+    }
+
+@app.post("/api/profile")
+async def update_profile(request: ProfileRequest):
+    """更新用户配置"""
+    if request.email not in task_executors:
+        raise HTTPException(status_code=404, detail=f"Account {request.email} not logged in")
+    
+    # 更新配置
+    user_profiles[request.email] = {
+        "display_name": request.display_name or "",
+        "avatar": request.avatar or "",
+        "signature": request.signature or "",
+        "reply_tone": request.reply_tone or "正式",
+        "auto_reply_enabled": request.auto_reply_enabled or False
+    }
+    
+    return {
+        "success": True,
+        "message": "配置已更新",
+        "profile": user_profiles[request.email]
+    }
 
 # ==================== 辅助函数 ====================
 

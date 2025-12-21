@@ -8,35 +8,111 @@ interface Email {
   time: string
   tags?: string[]
   read: boolean
+  category?: string
 }
 
 interface EmailListProps {
   emails: Email[]
   loading: boolean
   onCompose: () => void
+  onSearch: () => void
+  onEmailClick: (emailId: string) => void
   readFilter: 'all' | 'read' | 'unread'
   onReadFilterChange: (filter: 'all' | 'read' | 'unread') => void
   activeTab: string
+  categoryFilter: string
+  onCategoryChange: (category: string) => void
+  classifying: boolean
+  onClassify: (category?: string) => void
 }
 
-export default function EmailList({ emails, loading, onCompose, readFilter, onReadFilterChange, activeTab }: EmailListProps) {
-  // Filter emails based on read status
+export default function EmailList({ emails, loading, onCompose, onSearch, onEmailClick, readFilter, onReadFilterChange, activeTab, categoryFilter, onCategoryChange, classifying, onClassify }: EmailListProps) {
+  // 计算各分类的邮件数量
+  const categoryCounts = {
+    '工作': emails.filter(e => e.category === '工作').length,
+    '通知': emails.filter(e => e.category === '通知').length,
+    '营销': emails.filter(e => e.category === '营销').length,
+    '账单': emails.filter(e => e.category === '账单').length,
+  }
+
+  // Filter emails based on read status and category
   const filteredEmails = emails.filter(email => {
-    if (readFilter === 'read') return email.read
-    if (readFilter === 'unread') return !email.read
+    if (readFilter === 'read' && !email.read) return false
+    if (readFilter === 'unread' && email.read) return false
+    if (categoryFilter !== 'all' && email.category !== categoryFilter) return false
     return true
   })
   return (
     <main className="main-content">
       <header className="top-bar">
         <div className="tabs">
-          <button className="tab active">重要 <span className="tab-badge">2</span></button>
-          <button className="tab">更新 <span className="tab-badge">3</span></button>
-          <button className="tab">推广 <span className="tab-badge">35</span></button>
-          <button className="tab">账单 <span className="tab-badge">14</span></button>
+          <button 
+            className={`tab ${categoryFilter === 'all' ? 'active' : ''}`}
+            onClick={() => onCategoryChange('all')}
+            disabled={classifying}
+          >
+            全部 <span className="tab-badge">{emails.length}</span>
+          </button>
+          <button 
+            className={`tab ${categoryFilter === '工作' ? 'active' : ''}`}
+            onClick={() => {
+              if (categoryCounts['工作'] === 0) {
+                onClassify('工作')
+              } else {
+                onCategoryChange('工作')
+              }
+            }}
+            disabled={classifying}
+          >
+            工作 <span className="tab-badge">{categoryCounts['工作']}</span>
+          </button>
+          <button 
+            className={`tab ${categoryFilter === '通知' ? 'active' : ''}`}
+            onClick={() => {
+              if (categoryCounts['通知'] === 0) {
+                onClassify('通知')
+              } else {
+                onCategoryChange('通知')
+              }
+            }}
+            disabled={classifying}
+          >
+            通知 <span className="tab-badge">{categoryCounts['通知']}</span>
+          </button>
+          <button 
+            className={`tab ${categoryFilter === '营销' ? 'active' : ''}`}
+            onClick={() => {
+              if (categoryCounts['营销'] === 0) {
+                onClassify('营销')
+              } else {
+                onCategoryChange('营销')
+              }
+            }}
+            disabled={classifying}
+          >
+            营销 <span className="tab-badge">{categoryCounts['营销']}</span>
+          </button>
+          <button 
+            className={`tab ${categoryFilter === '账单' ? 'active' : ''}`}
+            onClick={() => {
+              if (categoryCounts['账单'] === 0) {
+                onClassify('账单')
+              } else {
+                onCategoryChange('账单')
+              }
+            }}
+            disabled={classifying}
+          >
+            账单 <span className="tab-badge">{categoryCounts['账单']}</span>
+          </button>
+          {classifying && (
+            <span style={{ marginLeft: '10px', fontSize: '12px', color: '#666' }}>
+              分类中...
+            </span>
+          )}
         </div>
         <div className="actions">
-          <button className="icon-btn"><Search size={18} /></button>
+          <button className="icon-btn" onClick={onSearch}><Search size={18} /></button>
           <button className="icon-btn"><MoreHorizontal size={18} /></button>
           <button className="primary-btn" onClick={onCompose}>
             <Plus size={18} />
@@ -141,7 +217,12 @@ export default function EmailList({ emails, loading, onCompose, readFilter, onRe
           }
           
           return (
-            <div key={email.id} className={`email-item ${!email.read ? 'unread' : ''}`}>
+            <div 
+              key={email.id} 
+              className={`email-item ${!email.read ? 'unread' : ''}`}
+              onClick={() => onEmailClick(String(email.id))}
+              style={{ cursor: 'pointer' }}
+            >
               <div className="sender-avatar" style={avatarStyle}>
                 {email.sender ? email.sender[0] : '?'}
               </div>
@@ -150,7 +231,34 @@ export default function EmailList({ emails, loading, onCompose, readFilter, onRe
                   <span className="sender-name">{email.sender}</span>
                   <span className="email-time">{email.time}</span>
                 </div>
-                <div className="email-subject">{email.subject}</div>
+                <div className="email-subject">
+                  {email.subject}
+                  {email.category && (
+                    <span 
+                      style={{
+                        marginLeft: '8px',
+                        padding: '2px 8px',
+                        fontSize: '11px',
+                        borderRadius: '10px',
+                        backgroundColor: 
+                          email.category === '工作' ? '#dbeafe' :
+                          email.category === '通知' ? '#e9d5ff' :
+                          email.category === '营销' ? '#fef3c7' :
+                          email.category === '账单' ? '#fecaca' :
+                          '#e5e7eb',
+                        color:
+                          email.category === '工作' ? '#1e40af' :
+                          email.category === '通知' ? '#7c3aed' :
+                          email.category === '营销' ? '#b45309' :
+                          email.category === '账单' ? '#b91c1c' :
+                          '#6b7280',
+                        fontWeight: 500
+                      }}
+                    >
+                      {email.category}
+                    </span>
+                  )}
+                </div>
                 <div className="email-preview">
                   {email.preview}
                   {email.tags?.map(tag => (
