@@ -1,5 +1,5 @@
 import { 
-  Inbox, FileText, Mail, Star, Archive, Trash2, Settings, Plus, LogOut, User, Send
+  Inbox, FileText, Mail, Star, Archive, Trash2, Settings, Plus, LogOut, User, Send, FilePenLine
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -127,6 +127,10 @@ export default function Sidebar({
           <Send size={18} />
           <span>已发送</span>
         </div>
+        <div className={`nav-item ${activeTab === 'drafts' ? 'active' : ''}`} onClick={() => setActiveTab('drafts')}>
+          <FilePenLine size={18} />
+          <span>草稿箱</span>
+        </div>
         
         <div className="nav-divider"></div>
         
@@ -134,11 +138,11 @@ export default function Sidebar({
           <FileText size={18} />
           <span>待办事项</span>
         </div>
-        <div className="nav-item">
+        <div className={`nav-item ${activeTab === 'archive' ? 'active' : ''}`} onClick={() => setActiveTab('archive')}>
           <Archive size={18} />
           <span>归档</span>
         </div>
-        <div className="nav-item">
+        <div className={`nav-item ${activeTab === 'trash' ? 'active' : ''}`} onClick={() => setActiveTab('trash')}>
           <Trash2 size={18} />
           <span>垃圾箱</span>
         </div>

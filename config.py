@@ -71,17 +71,31 @@ class Config:
     # 默认邮件文件夹
     DEFAULT_FOLDER: str = "INBOX"
 
-    # 归档文件夹名称
-    ARCHIVE_FOLDER: str = os.getenv("ARCHIVE_FOLDER", "Archive")
+    # 不同邮件服务商的文件夹名称映射
+    # 支持 QQ、163、Gmail 等邮箱的中英文及UTF-7编码文件夹名
+    FOLDER_NAMES = {
+        "sent": ["Sent Messages", "&XfJT0ZAB-", "已发送", "Sent"],  # QQ:"Sent Messages", 163:"&XfJT0ZAB-"
+        "drafts": ["Drafts", "&g0l6P3ux-", "草稿箱", "Draft"],  # QQ:"Drafts", 163:"&g0l6P3ux-"
+        "spam": ["Junk", "&V4NXPpCuTvY-", "垃圾邮件", "Spam"],  # QQ:"Junk", 163:"&V4NXPpCuTvY-"
+        "trash": ["Deleted Messages", "&XfJSIJZk-", "已删除", "Trash"],  # QQ:"Deleted Messages", 163:"&XfJSIJZk-"
+        "archive": ["Archive", "&dcVr0mWHTvZZOQ-", "归档"],  # 163:"&dcVr0mWHTvZZOQ-"
+        "starred": ["Starred", "星标邮件", "Flagged"],  # 星标通过FLAGS实现，不是文件夹
+    }
+
+    # 归档文件夹名称（尝试列表中的第一个）
+    ARCHIVE_FOLDER: str = FOLDER_NAMES["archive"][0]
 
     # 垃圾邮件文件夹
-    SPAM_FOLDER: str = os.getenv("SPAM_FOLDER", "Spam")
+    SPAM_FOLDER: str = FOLDER_NAMES["spam"][0]
 
     # 已发送邮件文件夹
-    SENT_FOLDER: str = os.getenv("SENT_FOLDER", "Sent")
+    SENT_FOLDER: str = FOLDER_NAMES["sent"][0]
 
     # 草稿箱文件夹
-    DRAFTS_FOLDER: str = os.getenv("DRAFTS_FOLDER", "Drafts")
+    DRAFTS_FOLDER: str = FOLDER_NAMES["drafts"][0]
+
+    # 删除文件夹
+    TRASH_FOLDER: str = FOLDER_NAMES["trash"][0]
 
     # 每次获取的最大邮件数量
     MAX_EMAILS_FETCH: int = int(os.getenv("MAX_EMAILS_FETCH", "50"))

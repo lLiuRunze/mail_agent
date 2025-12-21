@@ -53,7 +53,10 @@ export default function EmailList({ emails, loading, onCompose, readFilter, onRe
                 activeTab === 'inbox' ? '收件箱' :
                 activeTab === 'all' ? '所有邮件' :
                 activeTab === 'starred' ? '星标邮件' :
-                activeTab === 'sent' ? '已发送' : '邮件'}
+                activeTab === 'sent' ? '已发送' :
+                activeTab === 'drafts' ? '草稿箱' :
+                activeTab === 'archive' ? '归档' :
+                activeTab === 'trash' ? '垃圾箱' : '邮件'}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button 

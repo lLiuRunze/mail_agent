@@ -254,6 +254,30 @@ async def chat(request: ChatRequest):
         message=response_message
     )
 
+@app.get("/api/folders")
+async def get_folders(email: Optional[str] = None):
+    """List all available email folders for the specified account"""
+    if not task_executors:
+        raise HTTPException(status_code=401, detail="Please login first")
+
+    target_email = email
+    if not target_email:
+        if len(task_executors) == 1:
+            target_email = list(task_executors.keys())[0]
+        else:
+            target_email = list(task_executors.keys())[0]
+    
+    if target_email not in task_executors:
+        raise HTTPException(status_code=404, detail=f"Account {target_email} not logged in")
+        
+    executor = task_executors[target_email]
+    
+    try:
+        folders = executor.email_client.list_folders()
+        return {"success": True, "folders": folders, "account": target_email}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing folders: {str(e)}")
+
 @app.get("/api/emails")
 async def get_emails(
     email: Optional[str] = None, 
@@ -284,11 +308,8 @@ async def get_emails(
     
     try:
         # Use the email client directly to fetch emails
+        # Note: starred filtering is now handled in mailer.py
         emails = executor.email_client.get_recent_emails(count=limit, days=days, folder=folder)
-        
-        # Filter starred emails if requested
-        if starred:
-            emails = [e for e in emails if e.get('flagged', False)]
         
         return {"success": True, "emails": emails, "account": target_email}
     except Exception as e:
@@ -511,6 +532,17 @@ async def analyze_priority(email_id: str, request: EmailOperationRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing priority: {str(e)}")
+
+@app.post("/api/emails/{email_id}/classify")
+async def classify_email(email_id: str, request: EmailOperationRequest):
+    """Classify email content and return category, sentiment, urgency, etc."""
+    executor = _get_executor(request.email)
+    try:
+        params = {"email_id": email_id}
+        result = executor.execute_task("classify_email", params)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error classifying email: {str(e)}")
 
 @app.post("/api/emails/{email_id}/generate-reply")
 async def generate_reply(email_id: str, request: EmailOperationRequest):

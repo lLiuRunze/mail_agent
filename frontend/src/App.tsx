@@ -69,14 +69,24 @@ function App() {
     setLoadingEmails(true)
     try {
       // Determine folder based on activeTab
+      // Use folder type names that backend can intelligently match
       let folder = 'INBOX'
+      
       if (activeTab === 'sent') {
-        // Try common sent folder names
-        folder = 'Sent'  // Most common, will fallback in backend if needed
+        folder = 'sent'  // Backend will find "Sent Messages" or "已发送"
+      } else if (activeTab === 'drafts') {
+        folder = 'drafts'  // Backend will find "Drafts" or "草稿箱"
       } else if (activeTab === 'starred') {
-        folder = 'INBOX' // We'll filter starred on backend
+        // Backend will automatically filter FLAGGED emails from INBOX
+        folder = 'starred'
+      } else if (activeTab === 'archive') {
+        folder = 'archive'  // Backend will find "Archive" or "归档"
+      } else if (activeTab === 'trash') {
+        folder = 'trash'  // Backend will find "Deleted Messages" or "已删除"
       } else if (activeTab === 'all') {
-        folder = 'INBOX' // Get all from inbox for now
+        folder = 'INBOX' // Get all from inbox
+      } else if (activeTab === 'inbox') {
+        folder = 'INBOX'
       }
       
       const response = await axios.get('http://localhost:8000/api/emails', {
@@ -84,8 +94,7 @@ function App() {
           email: currentAccount,
           days: 30,
           limit: 100,
-          folder: folder,
-          starred: activeTab === 'starred' ? true : undefined
+          folder: folder
         }
       })
       

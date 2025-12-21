@@ -117,6 +117,31 @@ class EmailClient:
         
         print("→ IMAP 连接已断开，尝试重新连接...")
         return self.connect_imap()
+    
+    def list_folders(self) -> List[str]:
+        """列出所有可用的邮件文件夹"""
+        if not self._ensure_imap_connection():
+            return []
+        
+        try:
+            status, folders = self.imap_connection.list()
+            if status != "OK":
+                return []
+            
+            folder_list = []
+            for folder_data in folders:
+                if folder_data:
+                    folder_str = folder_data.decode() if isinstance(folder_data, bytes) else str(folder_data)
+                    # 提取文件夹名称（格式通常是: (\HasNoChildren) "." "FolderName"）
+                    parts = folder_str.split('"')
+                    if len(parts) >= 3:
+                        folder_name = parts[-2]
+                        folder_list.append(folder_name)
+            
+            return folder_list
+        except Exception as e:
+            print(f"✗ 列出文件夹失败: {str(e)}")
+            return []
 
     def connect_smtp(self) -> bool:
         """
@@ -193,6 +218,52 @@ class EmailClient:
 
         return "".join(result)
 
+    def _find_folder(self, folder_type: str) -> Optional[str]:
+        """根据文件夹类型查找实际的文件夹名称"""
+        if folder_type.upper() == "INBOX":
+            return "INBOX"
+        
+        # 对于 starred 类型，返回 None 表示使用 INBOX + FLAGGED 筛选
+        if folder_type.lower() == "starred":
+            print(f"→ starred 类型将使用 INBOX + FLAGGED 筛选")
+            return None
+        
+        # 获取所有文件夹
+        available_folders = self.list_folders()
+        if not available_folders:
+            return None
+        
+        # 从配置中获取可能的文件夹名称
+        folder_type_lower = folder_type.lower()
+        possible_names = Config.FOLDER_NAMES.get(folder_type_lower, [folder_type])
+        
+        # 第一轮：精确匹配（优先UTF-7编码和英文名）
+        for possible_name in possible_names:
+            if possible_name in available_folders:
+                print(f"→ 精确匹配文件夹: {folder_type} -> {possible_name}")
+                return possible_name
+        
+        # 第二轮：模糊匹配（不区分大小写）
+        for possible_name in possible_names:
+            for actual_folder in available_folders:
+                if possible_name.lower() == actual_folder.lower():
+                    print(f"→ 大小写匹配文件夹: {folder_type} -> {actual_folder}")
+                    return actual_folder
+        
+        # 第三轮：包含匹配
+        for possible_name in possible_names:
+            for actual_folder in available_folders:
+                if possible_name.lower() in actual_folder.lower() or actual_folder.lower() in possible_name.lower():
+                    print(f"→ 模糊匹配文件夹: {folder_type} -> {actual_folder}")
+                    return actual_folder
+        
+        # 如果没找到，尝试直接使用原始名称
+        if folder_type in available_folders:
+            return folder_type
+        
+        print(f"✗ 未找到文件夹类型: {folder_type}，可用文件夹: {available_folders}")
+        return None
+    
     def _select_folder(self, folder: str, retry_count: int = 2) -> bool:
         """
         选择邮件文件夹，支持163邮箱等特殊情况
@@ -208,29 +279,26 @@ class EmailClient:
         if not self._ensure_imap_connection():
             return False
 
+        # QQ邮箱等邮件服务器要求包含空格的文件夹名必须用双引号包裹
+        # 例如：Sent Messages -> "Sent Messages"
+        if ' ' in folder and not (folder.startswith('"') and folder.endswith('"')):
+            folder_with_quotes = f'"{folder}"'
+            print(f"→ 文件夹名包含空格，添加引号: {folder} -> {folder_with_quotes}")
+            folder = folder_with_quotes
+
         # 尝试直接选择
         for attempt in range(retry_count + 1):
+            # 方法 1: 直接 SELECT
             try:
                 status, response = self.imap_connection.select(folder)
                 if status == "OK":
                     print(f"✓ 成功选择文件夹: {folder}")
                     return True
                 else:
-                    print(f"✗ 无法选择文件夹: {folder}, status: {status}")
-                    # 尝试只读模式（EXAMINE）
-                    print(f"→ 尝试使用只读模式（EXAMINE）访问: {folder}")
-                    try:
-                        status, response = self.imap_connection.select(folder, readonly=True)
-                        if status == "OK":
-                            print(f"✓ 成功以只读模式选择文件夹: {folder}")
-                            return True
-                        else:
-                            print(f"✗ 只读模式也失败: status={status}, response={response}")
-                    except Exception as e:
-                        print(f"✗ 只读模式异常: {str(e)}")
+                    print(f"✗ SELECT 失败: {folder}, status: {status}, response: {response}")
             except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError, ConnectionError, BrokenPipeError) as e:
                 error_str = str(e)
-                print(f"✗ 选择文件夹异常 (尝试 {attempt + 1}/{retry_count + 1}): {folder}, error: {error_str}")
+                print(f"✗ SELECT 异常 (尝试 {attempt + 1}/{retry_count + 1}): {folder}, error: {error_str}")
                 
                 # 检查是否是连接错误 (WinError 10054 等)
                 is_connection_error = any(keyword in error_str.lower() for keyword in [
@@ -247,107 +315,38 @@ class EmailClient:
                         continue
                     print(f"→ 重新连接成功，继续尝试...")
                     continue
-                return False
+                # 不是连接错误，继续尝试只读模式
             except Exception as e:
                 error_str = str(e)
-                print(f"✗ 选择文件夹未知异常: {folder}, error: {error_str}")
-                
-                # 对于未知异常，也尝试重连一次
-                if attempt < retry_count:
-                    print(f"→ 尝试重连后再试...")
-                    self.disconnect_imap()
-                    import time
-                    time.sleep(1)
-                    if self._ensure_imap_connection():
-                        continue
-                return False
-
-        # 如果是 INBOX，尝试不同的大小写变体
-        if folder.upper() == "INBOX":
-            for alt_name in ["Inbox", "inbox"]:
-                try:
-                    status, response = self.imap_connection.select(alt_name)
-                    if status == "OK":
-                        print(f"✓ 成功选择文件夹: {alt_name}")
-                        return True
-                except Exception:
-                    pass
-
-        # 尝试列出并使用第一个可用文件夹
-        print("→ 尝试列出所有可用文件夹...")
-        try:
-            status, folders = self.imap_connection.list()
-            print(f"→ LIST 命令状态: {status}, 返回 {len(folders) if folders else 0} 个文件夹")
+                print(f"✗ SELECT 未知异常: {folder}, error: {error_str}")
             
-            if status == "OK" and folders:
-                print("→ 解析文件夹列表:")
-                available_folders = []
-                
-                for folder_data in folders:
-                    if folder_data:
-                        # 解析文件夹名称
-                        folder_str = folder_data.decode() if isinstance(folder_data, bytes) else str(folder_data)
-                        print(f"  原始数据: {folder_str}")
-                        
-                        # IMAP LIST 响应格式: (flags) "delimiter" "folder_name"
-                        import re
-                        match = re.search(r'"([^"]*)"$', folder_str)
-                        if match:
-                            folder_name = match.group(1)
-                            available_folders.append(folder_name)
-                            print(f"  → 找到文件夹: {folder_name}")
-                
-                print(f"→ 共找到 {len(available_folders)} 个有效文件夹")
-                
-                # 优先选择包含inbox或收件箱的文件夹
-                for folder_name in available_folders:
-                    if "inbox" in folder_name.lower() or "收件箱" in folder_name:
-                        print(f"→ 尝试选择包含inbox的文件夹: {folder_name}")
-                        try:
-                            status, _ = self.imap_connection.select(folder_name)
-                            if status == "OK":
-                                print(f"✓ 使用文件夹: {folder_name}")
-                                return True
-                            else:
-                                print(f"  选择失败: status={status}")
-                                # 尝试只读模式
-                                print(f"  → 尝试只读模式")
-                                status, _ = self.imap_connection.select(folder_name, readonly=True)
-                                if status == "OK":
-                                    print(f"✓ 以只读模式使用文件夹: {folder_name}")
-                                    return True
-                        except Exception as ex:
-                            print(f"  选择异常: {str(ex)}")
-                
-                # 如果没找到inbox相关的，使用第一个文件夹
-                if available_folders:
-                    first_folder = available_folders[0]
-                    print(f"→ 尝试使用第一个可用文件夹: {first_folder}")
-                    try:
-                        status, _ = self.imap_connection.select(first_folder)
-                        if status == "OK":
-                            print(f"✓ 使用第一个可用文件夹: {first_folder}")
-                            return True
-                        else:
-                            print(f"  选择失败: status={status}")
-                            # 尝试只读模式
-                            print(f"  → 尝试只读模式")
-                            status, _ = self.imap_connection.select(first_folder, readonly=True)
-                            if status == "OK":
-                                print(f"✓ 以只读模式使用第一个可用文件夹: {first_folder}")
-                                return True
-                    except Exception as ex:
-                        print(f"  选择异常: {str(ex)}")
+            # 方法 2: 尝试只读模式（readonly=True 对应 EXAMINE 命令）
+            print(f"→ 尝试只读模式访问: {folder}")
+            try:
+                status, response = self.imap_connection.select(folder, readonly=True)
+                if status == "OK":
+                    print(f"✓ 成功以只读模式选择文件夹: {folder}")
+                    return True
                 else:
-                    print("✗ 未找到任何有效文件夹")
+                    print(f"✗ 只读模式失败: status={status}, response={response}")
+            except Exception as e:
+                print(f"✗ 只读模式异常: {str(e)}")
+            
+            # 如果是最后一次尝试，还可以尝试重连
+            if attempt < retry_count:
+                print(f"→ 尝试重连后再试 ({attempt + 1}/{retry_count})...")
+                self.disconnect_imap()
+                import time
+                time.sleep(1)
+                if not self._ensure_imap_connection():
+                    print(f"✗ 重新连接失败")
+                    return False
+                print(f"→ 重新连接成功，继续尝试...")
             else:
-                print(f"✗ LIST 命令失败或返回空列表")
-        except Exception as e:
-            print(f"✗ 列出文件夹失败: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-        print(f"✗ 无法选择任何文件夹")
+                # 最后一次尝试失败
+                print(f"✗ 无法选择文件夹: {folder}")
+                return False
+        
         return False
 
     def _get_email_body(self, msg: Message) -> str:
@@ -496,7 +495,8 @@ class EmailClient:
 
         Args:
             count: 获取的邮件数量
-            folder: 邮件文件夹，默认为收件箱
+            days: 获取最近多少天的邮件
+            folder: 邮件文件夹，默认为收件箱。可以是"sent"、"drafts"等类型名，会自动匹配实际文件夹
 
         Returns:
             List[Dict[str, Any]]: 邮件信息列表
@@ -506,10 +506,26 @@ class EmailClient:
 
         try:
             folder = folder or Config.DEFAULT_FOLDER
+            original_folder = folder
+            use_starred_filter = False
+            
+            # 如果不是INBOX，尝试智能匹配文件夹
+            if folder.upper() != "INBOX":
+                actual_folder = self._find_folder(folder)
+                if actual_folder:
+                    folder = actual_folder
+                elif original_folder.lower() == "starred":
+                    # starred 类型找不到独立文件夹，使用 INBOX + FLAGGED 筛选
+                    print(f"→ starred 类型没有独立文件夹，将从 INBOX 筛选 FLAGGED 邮件")
+                    folder = "INBOX"
+                    use_starred_filter = True
+                else:
+                    print(f"✗ 找不到文件夹 {folder}，返回空列表")
+                    return []
             
             # 使用新的 _select_folder 方法
             if not self._select_folder(folder):
-                print(f"✗ 无法选择文件夹，返回空列表")
+                print(f"✗ 无法选择文件夹 {folder}，返回空列表")
                 return []
 
             # 搜索最近30天的邮件，如果找不到则搜索所有邮件
@@ -549,6 +565,9 @@ class EmailClient:
             for index, email_id in enumerate(recent_ids, 1):
                 email_info = self.get_email(email_id.decode())
                 if email_info:
+                    # 如果需要筛选星标邮件，跳过未标记的
+                    if use_starred_filter and not email_info.get('flagged', False):
+                        continue
                     # 添加时间排序的索引（从1开始）
                     email_info["index"] = index
                     # 保存原始IMAP UID用于后续操作
