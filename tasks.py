@@ -40,9 +40,9 @@ class TaskExecutor:
         "automated@",
     }
 
-    def __init__(self):
+    def __init__(self, email_client: Optional[mailer.EmailClient] = None):
         """初始化任务执行器"""
-        self.email_client = mailer.EmailClient()
+        self.email_client = email_client or mailer.EmailClient()
         self.deepseek_api = deepseek.DeepSeekAPI()
 
         # 任务处理函数映射
@@ -55,6 +55,7 @@ class TaskExecutor:
             "mark_unread": self.mark_email_as_unread,
             "summarize_email": self.summarize_email,
             "analyze_priority": self.analyze_email_priority,
+            "classify_email": self.classify_email_content,
             "move_email": self.move_email_to_folder,
             "generate_reply": self.generate_auto_reply,
             "list_emails": self.list_recent_emails,
@@ -933,6 +934,42 @@ class TaskExecutor:
                 "subject": email_info["subject"],
                 "from": email_info["from"],
                 "priority_analysis": priority_info,
+            },
+        }
+
+    def classify_email_content(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分类邮件内容，返回分类、情感、紧急程度等信息
+
+        Args:
+            parameters: 包含 email_id
+
+        Returns:
+            Dict[str, Any]: 执行结果
+        """
+        email_id = parameters.get("email_id")
+
+        # 获取邮件
+        email_info = self._get_email_by_id(email_id)
+        if not email_info:
+            return {
+                "success": False,
+                "message": f"未找到邮件: {email_id}",
+                "data": None,
+            }
+
+        # 分析邮件内容
+        print("→ 正在分类邮件...")
+        analysis_result = self.deepseek_api.analyze_email_content(email_info["body"])
+
+        return {
+            "success": True,
+            "message": "邮件分类完成",
+            "data": {
+                "email_id": email_id,
+                "subject": email_info["subject"],
+                "from": email_info["from"],
+                "classification": analysis_result,
             },
         }
 
