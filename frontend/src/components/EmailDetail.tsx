@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Mail, User, Calendar, Paperclip, Reply, Forward, Trash2, Archive, Loader2 } from 'lucide-react'
-import axios from 'axios'
+import api from '../lib/api'
 import './EmailDetail.css'
 
 interface EmailDetailProps {
@@ -66,7 +66,7 @@ export default function EmailDetail({
     
     try {
       console.log('Loading email detail for ID:', emailId)
-      const response = await axios.post('http://localhost:8000/api/emails/detail', {
+      const response = await api.post('/api/emails/detail', {
         email: currentAccount,
         email_id: emailId
       })

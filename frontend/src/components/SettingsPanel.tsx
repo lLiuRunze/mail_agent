@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, User, Save, Edit2} from 'lucide-react'
-import axios from 'axios'
+import api from '../lib/api'
 import './SettingsPanel.css'
 
 interface AccountProfile {
@@ -37,7 +37,7 @@ export default function SettingsPanel({ currentAccount, onClose, onProfileUpdate
 
   const loadProfile = async () => {
     try {
-      const response = await axios.get(`http://localhost:8000/api/profile?email=${currentAccount}`)
+      const response = await api.get(`/api/profile?email=${currentAccount}`)
       if (response.data.success) {
         setProfile({
           email: currentAccount,
@@ -57,7 +57,7 @@ export default function SettingsPanel({ currentAccount, onClose, onProfileUpdate
     setIsSaving(true)
     setMessage('')
     try {
-      const response = await axios.post('http://localhost:8000/api/profile', {
+      const response = await api.post('/api/profile', {
         email: currentAccount,
         display_name: profile.displayName,
         avatar: profile.avatar,
