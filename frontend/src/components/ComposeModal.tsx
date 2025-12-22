@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, Minimize2, Maximize2, Send, Bot, Paperclip, Loader2 } from 'lucide-react'
-import axios from 'axios'
+import api from '../lib/api'
 
 interface ComposeModalProps {
   onClose: () => void
@@ -25,7 +25,7 @@ export default function ComposeModal({ onClose, currentAccount, onSendSuccess }:
 
     setLoading(true)
     try {
-      const response = await axios.post('http://localhost:8000/api/generate/compose', {
+      const response = await api.post('/api/generate/compose', {
         email: currentAccount,
         to: [to],
         subject: subject,
@@ -53,7 +53,7 @@ export default function ComposeModal({ onClose, currentAccount, onSendSuccess }:
 
     setSending(true)
     try {
-      const response = await axios.post('http://localhost:8000/api/compose', {
+      const response = await api.post('/api/compose', {
         email: currentAccount,
         to: [to],
         subject: subject,

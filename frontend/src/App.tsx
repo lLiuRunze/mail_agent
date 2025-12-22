@@ -128,7 +128,7 @@ function App() {
     
     try {
       // 调用后端生成回复
-      const generateResponse = await axios.post(`http://localhost:8000/api/emails/${emailId}/generate-reply`, {
+      const generateResponse = await api.post(`/api/emails/${emailId}/generate-reply`, {
         email: currentAccount,
         auto_generate: true
       })
