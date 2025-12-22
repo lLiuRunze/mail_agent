@@ -287,7 +287,7 @@ async def get_folders(email: Optional[str] = None):
 async def get_emails(
     email: Optional[str] = None, 
     days: int = 30, 
-    limit: int = 50, 
+    limit: int = 20, 
     folder: str = "INBOX",
     starred: Optional[bool] = None
 ):

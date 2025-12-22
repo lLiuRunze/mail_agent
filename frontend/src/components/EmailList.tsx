@@ -186,8 +186,9 @@ export default function EmailList({ emails, loading, onCompose, onSearch, onEmai
           {!loading && emails.length === 0 && <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>暂无邮件</div>}
         </div>
         {loading && (
-          <div style={{display: 'flex', justifyContent: 'center', padding: '2rem'}}>
-            <Loader2 className="spin" size={24} />
+          <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem', color: '#6b7280'}}>
+            <Loader2 className="spin" size={32} style={{marginBottom: '12px'}} />
+            <p style={{fontSize: '14px', margin: 0}}>正在加载邮件...</p>
           </div>
         )}
         {!loading && filteredEmails.map(email => {

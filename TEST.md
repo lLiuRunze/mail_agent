@@ -11,8 +11,13 @@
 ### 1. 后端启动
 
 ```bash
-# 激活虚拟环境（如使用conda）
-conda activate F:\MyCode\mail_agent\.conda
+# 安装后端依赖（首次运行）
+pip install -r requirements.txt
+
+# 或使用conda创建虚拟环境
+conda create -p ./.conda python=3.10
+conda activate ./.conda
+pip install -r requirements.txt
 
 # 启动后端服务
 python -m uvicorn server:app --reload
@@ -58,14 +63,22 @@ npm run dev
 ```
 
 ### 邮件操作测试
-1. **回复邮件**：输入"回复第一封邮件"
-   - 查看生成的邮件预览
-   - 点击"编辑"修改内容
-   - 点击"发送"确认发送
+1. **回复邮件**：在邮件详情页点击"回复"按钮
+   - AI自动生成回复预览
+   - 在聊天界面查看预览
+   - 点击"编辑"修改或"发送"确认
 
 2. **新建邮件**：点击"写邮件"按钮
-   - 填写收件人、主题、内容
-   - 发送邮件
+   - 填写收件人、主题
+   - 点击"AI 写作"按钮
+   - 输入邮件需求（如："写一封请假邮件"）
+   - AI生成邮件内容预览
+   - 点击右上角发送图标发送
+
+3. **AI助手写邮件**：在聊天框输入
+   - "给张三发邮件，告诉他项目延期"
+   - 查看生成的邮件预览
+   - 编辑或发送
 
 ## 常见问题
 

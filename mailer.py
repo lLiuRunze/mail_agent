@@ -421,12 +421,13 @@ class EmailClient:
 
         return body.strip()
 
-    def get_email(self, email_id: str) -> Optional[Dict[str, Any]]:
+    def get_email(self, email_id: str, lightweight: bool = False) -> Optional[Dict[str, Any]]:
         """
         根据邮件 ID 获取邮件信息
 
         Args:
             email_id: 邮件 ID（IMAP UID）
+            lightweight: 是否只获取轻量级信息（不获取正文，速度更快）
 
         Returns:
             Optional[Dict[str, Any]]: 邮件信息字典，失败返回 None
@@ -439,8 +440,14 @@ class EmailClient:
             if not self._select_folder(Config.DEFAULT_FOLDER):
                 return None
 
-            # 获取邮件和FLAGS
-            status, data = self.imap_connection.fetch(email_id, "(RFC822 FLAGS)") # type: ignore
+            # 如果是轻量级模式，只获取ENVELOPE和FLAGS
+            if lightweight:
+                status, data = self.imap_connection.fetch(
+                    email_id, "(ENVELOPE FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])"
+                ) # type: ignore
+            else:
+                # 获取邮件和FLAGS
+                status, data = self.imap_connection.fetch(email_id, "(RFC822 FLAGS)") # type: ignore
 
             if status != "OK":
                 print(f"✗ 获取邮件失败: {email_id}")
@@ -465,8 +472,11 @@ class EmailClient:
             to_header = msg.get("To", "")
             date = msg.get("Date", "")
 
-            # 获取邮件正文
-            body = self._get_email_body(msg)
+            # 获取邮件正文（轻量级模式下跳过以提升速度）
+            if lightweight:
+                body = ""  # 轻量级模式不获取正文
+            else:
+                body = self._get_email_body(msg)
 
             email_info = {
                 "id": email_id,
@@ -476,7 +486,7 @@ class EmailClient:
                 "to": to_header,
                 "date": date,
                 "body": body,
-                "raw_message": msg,
+                "raw_message": msg if not lightweight else None,
                 "seen": seen,
                 "flagged": flagged,
             }
@@ -563,7 +573,8 @@ class EmailClient:
 
             emails = []
             for index, email_id in enumerate(recent_ids, 1):
-                email_info = self.get_email(email_id.decode())
+                # 使用轻量级模式快速获取邮件列表（不获取正文）
+                email_info = self.get_email(email_id.decode(), lightweight=True)
                 if email_info:
                     # 如果需要筛选星标邮件，跳过未标记的
                     if use_starred_filter and not email_info.get('flagged', False):
