@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
+import api from './lib/api'
 import { Loader2, X } from 'lucide-react'
 import Login from './login'
 import Sidebar from './components/Sidebar'
@@ -81,7 +81,7 @@ function App() {
 
   const loadUserProfile = async (email: string) => {
     try {
-      const response = await axios.get(`http://localhost:8000/api/profile?email=${email}`)
+      const response = await api.get(`/api/profile?email=${email}`)
       if (response.data.success) {
         setUserProfiles(prev => ({
           ...prev,
@@ -137,7 +137,7 @@ function App() {
         folder = 'INBOX'
       }
       
-      const response = await axios.get('http://localhost:8000/api/emails', {
+      const response = await api.get('/api/emails', {
         params: {
           email: currentAccount,
           days: 30,
@@ -194,8 +194,8 @@ function App() {
       console.log(`开始批量分类 ${emailIds.length} 封邮件...`)
       
       // 调用批量分类接口
-      const response = await axios.post(
-        'http://localhost:8000/api/emails/batch/classify',
+      const response = await api.post(
+        '/api/emails/batch/classify',
         { 
           email: currentAccount,
           email_ids: emailIds
@@ -233,7 +233,7 @@ function App() {
 
   const checkAuth = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/check-auth')
+      const response = await api.get('/api/check-auth')
       if (response.data.authenticated) {
         setAccounts(response.data.accounts)
         setCurrentAccount(response.data.active_account)
@@ -255,7 +255,7 @@ function App() {
 
   const handleLogout = async (email: string) => {
     try {
-      await axios.post('http://localhost:8000/api/logout', null, {
+      await api.post('/api/logout', null, {
         params: { email }
       })
       
@@ -287,7 +287,7 @@ function App() {
 
     try {
       // Parse the user input using NLU to determine intent
-      const parseResponse = await axios.post('http://localhost:8000/api/chat', {
+      const parseResponse = await api.post('/api/chat', {
         message: originalInput,
         email: currentAccount,
         preview_only: true  // 使用预览模式
@@ -309,7 +309,7 @@ function App() {
           const emailId = parameters.email_id || 'latest'
           try {
             // Call generate_reply endpoint with correct path
-            const generateResponse = await axios.post(`http://localhost:8000/api/emails/${emailId}/generate-reply`, {
+            const generateResponse = await api.post(`/api/emails/${emailId}/generate-reply`, {
               email: currentAccount,
               auto_generate: true
             })
@@ -350,7 +350,7 @@ function App() {
           
           try {
             // Call backend to generate complete email content
-            const genResponse = await axios.post('http://localhost:8000/api/generate/compose', {
+            const genResponse = await api.post('/api/generate/compose', {
               email: currentAccount,
               to: [toAddr],
               subject: subject,
@@ -396,7 +396,7 @@ function App() {
       }
       
       // For other operations or if preview failed, execute directly
-      const executeResponse = await axios.post('http://localhost:8000/api/chat', {
+      const executeResponse = await api.post('/api/chat', {
         message: originalInput,
         email: currentAccount
       })
@@ -439,14 +439,14 @@ function App() {
       let payload: any = {}
       
       if (emailPreview.type === 'reply') {
-        endpoint = 'http://localhost:8000/api/reply'
+        endpoint = '/api/reply'
         payload = {
           email: currentAccount,
           email_id: emailPreview.email_id,
           content: content
         }
       } else {
-        endpoint = 'http://localhost:8000/api/compose'
+        endpoint = '/api/compose'
         payload = {
           email: currentAccount,
           to: [emailPreview.to],
@@ -456,7 +456,7 @@ function App() {
       }
       
       console.log('Sending to endpoint:', endpoint, 'with payload:', payload)
-      const response = await axios.post(endpoint, payload)
+      const response = await api.post(endpoint, payload)
       console.log('Send response:', response.data)
       
       if (response.data.success) {

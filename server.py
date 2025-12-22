@@ -16,9 +16,10 @@ from mailer import EmailClient
 app = FastAPI(title="Mail Agent API")
 
 # Enable CORS
+origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific frontend origin
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import axios from 'axios'
+import api from './lib/api'
 import { Mail, Lock, HelpCircle, X, Check, ChevronRight, AlertCircle } from 'lucide-react'
 import './login.css'
 
@@ -34,7 +34,7 @@ export default function Login({ onLoginSuccess, embedded = false }: LoginProps) 
     setError('')
 
     try {
-      const response = await axios.post('http://localhost:8000/api/login', {
+      const response = await api.post('/api/login', {
         email,
         password,
         provider

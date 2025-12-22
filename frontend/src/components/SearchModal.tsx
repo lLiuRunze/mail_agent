@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, Search, User, Mail, Loader2 } from 'lucide-react'
-import axios from 'axios'
+import api from '../lib/api'
 import './SearchModal.css'
 
 interface SearchModalProps {
@@ -31,7 +31,7 @@ export default function SearchModal({ currentAccount, onClose, onResultClick }: 
     setSearched(false)
 
     try {
-      const response = await axios.post('http://localhost:8000/api/emails/search', {
+      const response = await api.post('/api/emails/search', {
         email: currentAccount,
         content: searchContent || undefined,
         sender: searchSender || undefined
