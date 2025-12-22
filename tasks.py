@@ -55,12 +55,14 @@ class TaskExecutor:
             "mark_unread": self.mark_email_as_unread,
             "summarize_email": self.summarize_email,
             "analyze_priority": self.analyze_email_priority,
-            "classify_email": self.classify_email_content,
+            "batch_classify": self.batch_classify_emails,
             "move_email": self.move_email_to_folder,
             "generate_reply": self.generate_auto_reply,
             "list_emails": self.list_recent_emails,
             "search_email": self.search_emails,
             "compose_email": self.compose_email,
+            "get_email_detail": self.get_email_detail,
+            "unknown": self.handle_unknown_intent,
         }
 
     def execute_task(self, intent: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,12 +76,12 @@ class TaskExecutor:
         Returns:
             Dict[str, Any]: 执行结果
         """
+        # 如果意图不在处理器中，当作 unknown 处理
         if intent not in self.task_handlers:
-            return {
-                "success": False,
-                "message": f"不支持的任务类型: {intent}",
-                "data": None,
-            }
+            intent = "unknown"
+            # 保存原始用户输入到参数中
+            if "user_input" not in parameters:
+                parameters["user_input"] = parameters.get("content", "")
 
         try:
             handler = self.task_handlers[intent]
@@ -94,7 +96,7 @@ class TaskExecutor:
 
     def _get_email_by_id(self, email_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取邮件，支持特殊ID（如'latest'）和时间排序索引
+        获取邮件，支持特殊ID（如'latest'）、IMAP UID 和时间排序索引
 
         Args:
             email_id: 邮件ID、特殊标识或时间排序索引
@@ -108,16 +110,20 @@ class TaskExecutor:
             if emails:
                 return emails[0]
             return None
-        elif email_id.isdigit():
-            # 如果是数字，按时间排序索引获取
+        
+        # 先尝试按 IMAP UID 获取（直接从IMAP服务器获取）
+        email_info = self.email_client.get_email(email_id)
+        if email_info:
+            # 如果成功获取，添加 original_uid
+            email_info["original_uid"] = email_id
+            return email_info
+        
+        # 如果按UID获取失败，且是纯数字，尝试按索引获取
+        if email_id.isdigit():
             index = int(email_id)
             return self.email_client.get_email_by_index(index)
-        else:
-            # 尝试按原始IMAP UID获取（向后兼容）
-            email_info = self.email_client.get_email(email_id)
-            if email_info:
-                email_info["original_uid"] = email_id
-            return email_info
+        
+        return None
 
     def _get_emails_by_ids(self, email_ids: List[str]) -> List[Dict[str, Any]]:
         """
@@ -800,16 +806,17 @@ class TaskExecutor:
 
     def summarize_email(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        生成邮件摘要（支持批量操作）
+        生成邮件摘要（支持批量操作和搜索条件）
 
         Args:
-            parameters: 包含 email_id 或 count（批量操作）
+            parameters: 包含 email_id 或 count（批量操作）或 sender/from（按发件人搜索）
 
         Returns:
             Dict[str, Any]: 执行结果
         """
         email_id = parameters.get("email_id")
         count = parameters.get("count")
+        sender = parameters.get("sender") or parameters.get("from")
 
         # 如果是批量总结操作
         if count and not email_id:
@@ -823,11 +830,33 @@ class TaskExecutor:
                 }
             return self._summarize_multiple_emails(count)
 
+        # 如果指定了发件人条件，先搜索邮件
+        if not email_id and sender:
+            print(f"→ 正在搜索发件人包含 '{sender}' 的邮件...")
+            emails = self.email_client.get_recent_emails(count=50)
+            matched_emails = [
+                e for e in emails
+                if sender.lower() in e.get("from", "").lower() or 
+                   sender.lower() in e.get("from_name", "").lower()
+            ]
+            
+            if not matched_emails:
+                return {
+                    "success": False,
+                    "message": f"未找到发件人包含 '{sender}' 的邮件",
+                    "data": None,
+                }
+            
+            # 使用最近一封匹配的邮件的ID
+            found_email = matched_emails[0]
+            email_id = found_email.get("id")
+            print(f"→ 找到邮件: {found_email.get('subject')}")
+
         # 单个邮件总结
         if not email_id:
-            return {"success": False, "message": "缺少邮件ID", "data": None}
+            return {"success": False, "message": "缺少邮件ID或搜索条件", "data": None}
 
-        # 获取邮件
+        # 获取完整的邮件信息（包含body）
         email_info = self._get_email_by_id(email_id)
         if not email_info:
             return {
@@ -937,39 +966,66 @@ class TaskExecutor:
             },
         }
 
-    def classify_email_content(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    def batch_classify_emails(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        分类邮件内容，返回分类、情感、紧急程度等信息
+        批量分类邮件内容
 
         Args:
-            parameters: 包含 email_id
+            parameters: 包含 email_ids (邮件ID列表)
 
         Returns:
-            Dict[str, Any]: 执行结果
+            Dict[str, Any]: 执行结果，包含所有邮件的分类信息
         """
-        email_id = parameters.get("email_id")
+        email_ids = parameters.get("email_ids", [])
 
-        # 获取邮件
-        email_info = self._get_email_by_id(email_id)
-        if not email_info:
+        if not email_ids:
             return {
                 "success": False,
-                "message": f"未找到邮件: {email_id}",
+                "message": "未提供邮件ID列表",
                 "data": None,
             }
 
-        # 分析邮件内容
-        print("→ 正在分类邮件...")
-        analysis_result = self.deepseek_api.analyze_email_content(email_info["body"])
+        print(f"→ 正在批量分类 {len(email_ids)} 封邮件...")
+        
+        classifications = []
+        failed_count = 0
+
+        for email_id in email_ids:
+            try:
+                # 获取邮件
+                email_info = self._get_email_by_id(email_id)
+                if not email_info:
+                    print(f"✗ 未找到邮件: {email_id}")
+                    failed_count += 1
+                    continue
+
+                # 分析邮件内容
+                analysis_result = self.deepseek_api.analyze_email_content(email_info["body"])
+
+                classifications.append({
+                    "email_id": email_id,
+                    "subject": email_info["subject"],
+                    "from": email_info["from"],
+                    "classification": analysis_result,
+                })
+                
+                print(f"✓ 邮件 {email_id} 分类完成: {analysis_result.get('category', 'N/A')}")
+
+            except Exception as e:
+                print(f"✗ 分类邮件 {email_id} 失败: {str(e)}")
+                failed_count += 1
+
+        success_count = len(classifications)
+        total_count = len(email_ids)
 
         return {
             "success": True,
-            "message": "邮件分类完成",
+            "message": f"批量分类完成，成功 {success_count}/{total_count}",
             "data": {
-                "email_id": email_id,
-                "subject": email_info["subject"],
-                "from": email_info["from"],
-                "classification": analysis_result,
+                "total": total_count,
+                "success": success_count,
+                "failed": failed_count,
+                "classifications": classifications,
             },
         }
 
@@ -1094,29 +1150,39 @@ class TaskExecutor:
 
     def search_emails(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        搜索邮件（简单实现）
+        搜索邮件（支持按内容、发件人搜索）
 
         Args:
-            parameters: 包含 content（搜索关键词）
+            parameters: 包含 content（搜索关键词）或 sender/from（发件人）
 
         Returns:
             Dict[str, Any]: 执行结果
         """
         search_content = parameters.get("content", "")
+        sender = parameters.get("sender") or parameters.get("from")
 
-        if not search_content:
-            return {"success": False, "message": "缺少搜索关键词", "data": None}
+        if not search_content and not sender:
+            return {"success": False, "message": "缺少搜索关键词或发件人", "data": None}
 
         # 获取最近的邮件并进行简单搜索
         all_emails = self.email_client.get_recent_emails(count=50)
 
-        # 在主题和正文中搜索
+        # 搜索匹配的邮件
         matched_emails = []
         for email in all_emails:
-            if (
+            # 按内容搜索
+            content_match = not search_content or (
                 search_content.lower() in email["subject"].lower()
                 or search_content.lower() in email["body"].lower()
-            ):
+            )
+            
+            # 按发件人搜索
+            sender_match = not sender or (
+                sender.lower() in email.get("from", "").lower()
+                or sender.lower() in email.get("from_name", "").lower()
+            )
+            
+            if content_match and sender_match:
                 matched_emails.append(
                     {
                         "id": email.get("id"),
@@ -1128,19 +1194,73 @@ class TaskExecutor:
                 )
 
         if matched_emails:
+            search_desc = []
+            if search_content:
+                search_desc.append(f'内容包含"{search_content}"')
+            if sender:
+                search_desc.append(f'发件人包含"{sender}"')
+            
             return {
                 "success": True,
-                "message": f"找到 {len(matched_emails)} 封相关邮件",
+                "message": f"找到 {len(matched_emails)} 封相关邮件（{' 且 '.join(search_desc)}）",
                 "data": {
                     "search_term": search_content,
+                    "sender": sender,
                     "count": len(matched_emails),
                     "emails": matched_emails,
                 },
             }
         else:
+            search_desc = []
+            if search_content:
+                search_desc.append(f'内容包含"{search_content}"')
+            if sender:
+                search_desc.append(f'发件人包含"{sender}"')
+            
             return {
                 "success": False,
-                "message": f'未找到包含 "{search_content}" 的邮件',
+                "message": f'未找到满足条件的邮件（{" 且 ".join(search_desc)}）',
+                "data": None,
+            }
+
+    def get_email_detail(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        获取邮件详细内容
+
+        Args:
+            parameters: 包含 email_id
+
+        Returns:
+            Dict[str, Any]: 执行结果
+        """
+        email_id = parameters.get("email_id")
+        
+        if not email_id:
+            return {"success": False, "message": "缺少邮件ID", "data": None}
+
+        email_info = self._get_email_by_id(email_id)
+        
+        if email_info:
+            return {
+                "success": True,
+                "message": "获取邮件详情成功",
+                "data": {
+                    "id": email_info.get("id") or email_info.get("original_uid") or email_id,
+                    "subject": email_info.get("subject", "(无主题)"),
+                    "from": email_info.get("from", ""),
+                    "from_name": email_info.get("from_name", ""),
+                    "to": email_info.get("to", []),
+                    "cc": email_info.get("cc", []),
+                    "date": email_info.get("date", ""),
+                    "body": email_info.get("body", ""),
+                    "attachments": email_info.get("attachments", []),
+                    "read": email_info.get("read", False),
+                },
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"未找到邮件 ID: {email_id}",
                 "data": None,
             }
 
@@ -1203,6 +1323,54 @@ class TaskExecutor:
             }
         else:
             return {"success": False, "message": "发送邮件失败", "data": None}
+
+    def handle_unknown_intent(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理未知意图，使用 AI 生成友好回复
+
+        Args:
+            parameters: 包含 user_input（用户原始输入）
+
+        Returns:
+            Dict[str, Any]: 执行结果
+        """
+        user_input = parameters.get("user_input", parameters.get("content", ""))
+        
+        if not user_input:
+            return {
+                "success": False,
+                "message": "我无法理解您的请求，请提供更多信息。",
+                "data": None,
+            }
+
+        # 使用 DeepSeek API 生成自然的回复
+        try:
+            print("→ 正在生成回复...")
+            response = self.deepseek_api.chat(
+                f"""你是一个智能邮件助手。用户输入了以下内容：
+
+"{user_input}"
+
+这不是一个邮件管理任务（如查看、发送、搜索、归档邮件等）。请生成一个友好、自然的回复。
+
+如果是打招呼，友好地回应并介绍你的功能。
+如果是提问，尽量回答或引导用户使用正确的功能。
+如果是闲聊，简短回应并提醒用户你的主要功能。
+
+回复要简洁、友好、有帮助。"""
+            )
+            
+            return {
+                "success": True,
+                "message": response,
+                "data": {"ai_reply": response},
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"我无法理解您的请求。我是邮件助手，可以帮您管理邮件。您可以尝试：查看最近邮件、搜索邮件、发送邮件等。",
+                "data": None,
+            }
 
 
 # 创建全局任务执行器实例

@@ -11,6 +11,9 @@ interface SidebarProps {
   onAccountChange: (account: string) => void
   onAddAccount: () => void
   onLogout: (email: string) => void
+  onOpenSettings: () => void
+  displayName?: string
+  avatar?: string
 }
 
 export default function Sidebar({ 
@@ -20,7 +23,10 @@ export default function Sidebar({
   setActiveTab, 
   onAccountChange, 
   onAddAccount,
-  onLogout 
+  onLogout,
+  onOpenSettings,
+  displayName,
+  avatar
 }: SidebarProps) {
   const [showAccountMenu, setShowAccountMenu] = useState(false)
 
@@ -32,11 +38,11 @@ export default function Sidebar({
         onMouseLeave={() => setShowAccountMenu(false)}
         style={{position: 'relative', cursor: 'pointer'}}
       >
-        <div className="avatar-circle" style={{display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-          <User size={20} />
+        <div className="avatar-circle" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: avatar ? '24px' : '20px'}}>
+          {avatar || <User size={20} />}
         </div>
         <div className="user-info">
-          <div className="name">User</div>
+          <div className="name">{displayName || 'User'}</div>
           <div className="email">{currentAccount}</div>
         </div>
         
@@ -149,7 +155,7 @@ export default function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
-        <div className="nav-item">
+        <div className="nav-item" onClick={onOpenSettings}>
           <Settings size={18} />
           <span>设置</span>
         </div>

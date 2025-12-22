@@ -79,8 +79,97 @@ export default function AssistantPanel({
           <div>已处理 {result.affected} 项</div>
         )}
         
-        {/* Show data summary for email lists */}
-        {result.data && Array.isArray(result.data) && result.data.length > 0 && (
+        {/* Show summary content for single email summary */}
+        {result.data?.summary && typeof result.data.summary === 'string' && (
+          <div style={{
+            marginTop: '8px',
+            padding: '12px',
+            background: 'rgba(102, 126, 234, 0.1)',
+            borderRadius: '8px',
+            borderLeft: '3px solid #667eea'
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: '#667eea', fontSize: '14px' }}>
+              📝 邮件摘要
+            </div>
+            <div style={{ 
+              fontSize: '14px', 
+              lineHeight: '1.6',
+              whiteSpace: 'pre-wrap',
+              color: '#333'
+            }}>
+              {result.data.summary}
+            </div>
+            {result.data.subject && (
+              <div style={{ 
+                marginTop: '10px', 
+                paddingTop: '8px',
+                borderTop: '1px solid rgba(0,0,0,0.1)',
+                fontSize: '12px', 
+                color: '#666' 
+              }}>
+                <strong>主题:</strong> {result.data.subject}
+              </div>
+            )}
+            {result.data.from && (
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                <strong>发件人:</strong> {result.data.from}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Show summaries for batch email summary */}
+        {result.data?.summaries && Array.isArray(result.data.summaries) && (
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ 
+              fontWeight: 600, 
+              marginBottom: '12px', 
+              color: '#667eea',
+              fontSize: '14px'
+            }}>
+              📋 批量摘要（共 {result.data.summaries.length} 封邮件）
+            </div>
+            {result.data.summaries.map((item: any, idx: number) => (
+              <div key={idx} style={{
+                marginTop: idx > 0 ? '12px' : '0',
+                padding: '12px',
+                background: 'rgba(102, 126, 234, 0.08)',
+                borderRadius: '8px',
+                borderLeft: '3px solid #667eea'
+              }}>
+                <div style={{ 
+                  fontWeight: 600, 
+                  marginBottom: '6px', 
+                  fontSize: '13px',
+                  color: '#333'
+                }}>
+                  {idx + 1}. {item.subject}
+                </div>
+                {item.from && (
+                  <div style={{ 
+                    fontSize: '11px', 
+                    color: '#666', 
+                    marginBottom: '8px' 
+                  }}>
+                    发件人: {item.from}
+                  </div>
+                )}
+                <div style={{ 
+                  fontSize: '13px', 
+                  lineHeight: '1.6',
+                  whiteSpace: 'pre-wrap',
+                  color: '#444'
+                }}>
+                  {item.summary}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Show data summary for email lists (non-summary operations) */}
+        {result.data && Array.isArray(result.data) && result.data.length > 0 && 
+         !result.data[0]?.summary && (
           <div>
             <div style={{ marginTop: '4px', color: '#666' }}>
               显示前 {Math.min(3, result.data.length)} 项:

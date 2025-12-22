@@ -6,6 +6,9 @@ import Sidebar from './components/Sidebar'
 import EmailList from './components/EmailList'
 import AssistantPanel from './components/AssistantPanel'
 import ComposeModal from './components/ComposeModal'
+import SettingsPanel from './components/SettingsPanel'
+import SearchModal from './components/SearchModal'
+import EmailDetail from './components/EmailDetail'
 import './App.css'
 
 interface Message {
@@ -30,6 +33,7 @@ interface Email {
   time: string
   tags?: string[]
   read: boolean
+  category?: string
 }
 
 function App() {
@@ -38,6 +42,9 @@ function App() {
   const [currentAccount, setCurrentAccount] = useState('')
   const [authChecking, setAuthChecking] = useState(true)
   const [showAddAccount, setShowAddAccount] = useState(false)
+  
+  // User Profile
+  const [userProfiles, setUserProfiles] = useState<Record<string, {displayName: string, avatar: string}>>({})
 
   // Chat State
   const [messages, setMessages] = useState<Message[]>([
@@ -49,11 +56,17 @@ function App() {
   // UI State
   const [activeTab, setActiveTab] = useState('inbox')
   const [showCompose, setShowCompose] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showSearch, setShowSearch] = useState(false)
+  const [showEmailDetail, setShowEmailDetail] = useState(false)
+  const [selectedEmailId, setSelectedEmailId] = useState<string>('')
   const [readFilter, setReadFilter] = useState<'all' | 'read' | 'unread'>('all')
   
   // Email Data
   const [emails, setEmails] = useState<Email[]>([])
   const [loadingEmails, setLoadingEmails] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [classifying, setClassifying] = useState(false)
 
   useEffect(() => {
     checkAuth()
@@ -62,8 +75,43 @@ function App() {
   useEffect(() => {
     if (currentAccount) {
       fetchEmails()
+      loadUserProfile(currentAccount)
     }
   }, [currentAccount, activeTab])
+
+  const loadUserProfile = async (email: string) => {
+    try {
+      const response = await axios.get(`http://localhost:8000/api/profile?email=${email}`)
+      if (response.data.success) {
+        setUserProfiles(prev => ({
+          ...prev,
+          [email]: {
+            displayName: response.data.profile.display_name || '',
+            avatar: response.data.profile.avatar || ''
+          }
+        }))
+      }
+    } catch (error) {
+      console.error('Failed to load user profile:', error)
+    }
+  }
+
+  const handleProfileUpdate = (displayName: string, avatar: string) => {
+    setUserProfiles(prev => ({
+      ...prev,
+      [currentAccount]: { displayName, avatar }
+    }))
+  }
+
+  const handleEmailClick = (emailId: string) => {
+    console.log('Email clicked:', emailId, 'Current account:', currentAccount)
+    if (!currentAccount) {
+      console.error('No current account set!')
+      return
+    }
+    setSelectedEmailId(emailId)
+    setShowEmailDetail(true)
+  }
 
   const fetchEmails = async () => {
     setLoadingEmails(true)
@@ -132,6 +180,54 @@ function App() {
       return date.toLocaleDateString()
     } catch (e) {
       return dateStr
+    }
+  }
+
+  const classifyEmails = async (targetCategory?: string) => {
+    if (!currentAccount || emails.length === 0) return
+    
+    setClassifying(true)
+    try {
+      // 收集所有邮件ID
+      const emailIds = emails.map(email => email.id.toString())
+      
+      console.log(`开始批量分类 ${emailIds.length} 封邮件...`)
+      
+      // 调用批量分类接口
+      const response = await axios.post(
+        'http://localhost:8000/api/emails/batch/classify',
+        { 
+          email: currentAccount,
+          email_ids: emailIds
+        }
+      )
+      
+      if (response.data.success) {
+        const { classifications } = response.data.data
+        
+        // 创建分类映射
+        const classificationMap: { [key: string]: string } = {}
+        classifications.forEach((item: any) => {
+          classificationMap[item.email_id] = item.classification.category
+        })
+        
+        // 更新邮件列表，添加分类信息
+        setEmails(prev => prev.map(email => ({
+          ...email,
+          category: classificationMap[email.id.toString()] || email.category
+        })))
+        
+        console.log(`批量分类完成: ${response.data.data.success}/${response.data.data.total} 成功`)
+        
+        // 如果指定了目标分类，则切换到该分类筛选
+        if (targetCategory) {
+          setCategoryFilter(targetCategory)
+        }
+      }
+    } catch (error) {
+      console.error('批量分类失败:', error)
+    } finally {
+      setClassifying(false)
     }
   }
 
@@ -238,10 +334,10 @@ function App() {
             return
           }
         } else if (intent === 'compose_email') {
-          // For compose, extract info from parameters
+          // For compose, call backend to generate content
           const contentPrompt = parameters.content_prompt || parameters.content || ''
           const toAddr = parameters.to_addr || ''
-          const subject = parameters.subject || '新邮件'
+          const subject = parameters.subject || ''
           
           if (!toAddr) {
             setMessages(prev => [...prev, {
@@ -252,11 +348,29 @@ function App() {
             return
           }
           
-          // Use content directly
-          previewContent = contentPrompt || '（请输入邮件内容）'
-          emailInfo = {
-            to: toAddr,
-            subject: subject
+          try {
+            // Call backend to generate complete email content
+            const genResponse = await axios.post('http://localhost:8000/api/generate/compose', {
+              email: currentAccount,
+              to: [toAddr],
+              subject: subject,
+              content: contentPrompt
+            })
+            
+            const genData = genResponse.data
+            previewContent = genData.content || contentPrompt || '（请输入邮件内容）'
+            emailInfo = {
+              to: genData.to || toAddr,
+              subject: genData.subject || subject || '新邮件'
+            }
+          } catch (err: any) {
+            console.error('Error generating compose content:', err)
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `生成邮件内容失败: ${err.response?.data?.detail || err.message}`
+            }])
+            setLoading(false)
+            return
           }
         }
         
@@ -396,19 +510,63 @@ function App() {
         onAccountChange={setCurrentAccount}
         onAddAccount={() => setShowAddAccount(true)}
         onLogout={handleLogout}
+        onOpenSettings={() => setShowSettings(true)}
+        displayName={userProfiles[currentAccount]?.displayName}
+        avatar={userProfiles[currentAccount]?.avatar}
       />
 
       <EmailList 
         emails={emails}
         loading={loadingEmails}
         onCompose={() => setShowCompose(true)}
+        onSearch={() => setShowSearch(true)}
+        onEmailClick={handleEmailClick}
         readFilter={readFilter}
         onReadFilterChange={setReadFilter}
         activeTab={activeTab}
+        categoryFilter={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        classifying={classifying}
+        onClassify={classifyEmails}
       />
 
       {showCompose && (
         <ComposeModal onClose={() => setShowCompose(false)} />
+      )}
+
+      {showSearch && (
+        <SearchModal 
+          currentAccount={currentAccount}
+          onClose={() => setShowSearch(false)}
+          onResultClick={(email) => {
+            console.log('Search result clicked:', email)
+            setShowSearch(false)
+          }}
+        />
+      )}
+
+      {showEmailDetail && selectedEmailId && currentAccount && (
+        <EmailDetail
+          emailId={selectedEmailId}
+          currentAccount={currentAccount}
+          onClose={() => {
+            setShowEmailDetail(false)
+            setSelectedEmailId('')
+          }}
+          onReply={() => {
+            setShowEmailDetail(false)
+            setSelectedEmailId('')
+            // TODO: Open compose modal with reply context
+          }}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsPanel 
+          currentAccount={currentAccount}
+          onClose={() => setShowSettings(false)}
+          onProfileUpdate={handleProfileUpdate}
+        />
       )}
 
       <AssistantPanel 

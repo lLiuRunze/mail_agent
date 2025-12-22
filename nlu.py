@@ -211,6 +211,8 @@ class NLUEngine:
     "folder_name": "文件夹名称（如果有）",
     "count": "数量（如果有）",
     "content": "内容（如果有）",
+    "sender": "发件人（如果有）",
+    "from": "发件人（如果有，与sender相同）",
     "batch_operation": "是否为批量操作（true/false）"
 }}
 
@@ -228,10 +230,14 @@ class NLUEngine:
    - "最近10封" → 10
    - "前5封" → 5
    - "三封邮件" → 3
-5. batch_operation判断：
+5. sender/from提取规则：
+   - "发件人为steam" → "steam"
+   - "来自张三的邮件" → "张三"
+   - "xxx发来的邮件" → "xxx"
+6. batch_operation判断：
    - "前N封"、"最近N封"、"批量" → true
    - 单个邮件操作 → false
-6. 不要提取邮箱地址（email_address、forward_to、recipients），这些由正则表达式处理
+7. 不要提取邮箱地址（email_address、forward_to、recipients），这些由正则表达式处理
 
 示例：
 - "转发第一封邮件" → {{"email_id": "1", "batch_operation": false}}
@@ -239,7 +245,9 @@ class NLUEngine:
 - "转发前三封邮件" → {{"email_id": "1", "batch_operation": true, "count": 3}}
 - "删除最近5封邮件" → {{"email_id": "1", "batch_operation": true, "count": 5}}
 - "归档邮件到工作文件夹" → {{"email_id": "latest", "folder_name": "工作文件夹", "batch_operation": false}}
-- "总结最近10封邮件" → {{"batch_operation": true, "count": 10}}"""
+- "总结最近10封邮件" → {{"batch_operation": true, "count": 10}}
+- "总结发件人为steam的邮件" → {{"sender": "steam", "batch_operation": false}}
+- "搜索来自张三的邮件" → {{"sender": "张三"}}"""
 
         messages = [
             {
