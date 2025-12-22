@@ -113,6 +113,60 @@ function App() {
     setShowEmailDetail(true)
   }
 
+  const handleReplyFromDetail = async (emailId: string) => {
+    // 关闭详情页
+    setShowEmailDetail(false)
+    setSelectedEmailId('')
+    
+    // 添加用户消息到聊天
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: `回复邮件 ${emailId}`
+    }])
+    
+    setLoading(true)
+    
+    try {
+      // 调用后端生成回复
+      const generateResponse = await axios.post(`http://localhost:8000/api/emails/${emailId}/generate-reply`, {
+        email: currentAccount,
+        auto_generate: true
+      })
+      
+      if (generateResponse.data.success) {
+        const genData = generateResponse.data.data
+        const previewContent = genData.reply_content
+        const emailInfo = {
+          type: 'reply' as const,
+          to: genData.from,
+          subject: `Re: ${genData.subject}`,
+          content: previewContent,
+          email_id: emailId
+        }
+        
+        // 添加AI回复消息到聊天
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `我已为你生成了回复邮件的草稿，你可以查看并编辑后发送。`,
+          emailPreview: emailInfo
+        }])
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `生成回复失败: ${generateResponse.data.message}`
+        }])
+      }
+    } catch (err: any) {
+      console.error('Generate reply error:', err)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `生成回复失败: ${err.response?.data?.detail || err.message}`
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const fetchEmails = async () => {
     setLoadingEmails(true)
     try {
@@ -141,7 +195,7 @@ function App() {
         params: {
           email: currentAccount,
           days: 30,
-          limit: 100,
+          limit: 30,
           folder: folder
         }
       })
@@ -151,7 +205,7 @@ function App() {
           id: e.id,
           sender: e.from_name || e.from,
           subject: e.subject,
-          preview: e.body ? e.body.substring(0, 100) + '...' : 'No content',
+          preview: e.body ? e.body.substring(0, 100) + '...' : '点击查看邮件内容...',
           time: formatEmailDate(e.date),
           read: e.seen !== undefined ? e.seen : true,
           tags: []
@@ -531,7 +585,11 @@ function App() {
       />
 
       {showCompose && (
-        <ComposeModal onClose={() => setShowCompose(false)} />
+        <ComposeModal 
+          onClose={() => setShowCompose(false)}
+          currentAccount={currentAccount}
+          onSendSuccess={fetchEmails}
+        />
       )}
 
       {showSearch && (
@@ -553,11 +611,7 @@ function App() {
             setShowEmailDetail(false)
             setSelectedEmailId('')
           }}
-          onReply={() => {
-            setShowEmailDetail(false)
-            setSelectedEmailId('')
-            // TODO: Open compose modal with reply context
-          }}
+          onReply={() => handleReplyFromDetail(selectedEmailId)}
         />
       )}
 
