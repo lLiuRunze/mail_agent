@@ -817,6 +817,11 @@ class TaskExecutor:
         email_id = parameters.get("email_id")
         count = parameters.get("count")
         sender = parameters.get("sender") or parameters.get("from")
+        batch_operation = parameters.get("batch_operation", False)
+
+        # 如果明确标记为批量操作但没有指定count，使用默认值5
+        if batch_operation and not count and not email_id and not sender:
+            count = 5
 
         # 如果是批量总结操作
         if count and not email_id:
